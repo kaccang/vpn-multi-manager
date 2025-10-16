@@ -27,11 +27,8 @@ uuid=$(cat /proc/sys/kernel/random/uuid)
 read -p "Expired (days): " masaaktif
 exp=$(date -d "$masaaktif days" +"%Y-%m-%d")
 
-# Add to config
+# Add to config (insert after marker)
 sed -i "/#vless$/a\#& $user $exp\n},{ \"id\": \"$uuid\", \"email\": \"$user\"" "$CONFIG"
-
-# Remove placeholder if exists (first user)
-sed -i '/"id": "placeholder-uuid"$/,/#vless$/ { /"id": "placeholder-uuid"$/d; }' "$CONFIG"
 
 # Generate VLess link
 vlesslink="vless://${uuid}@${DOMAIN}:443?path=/vless&security=tls&encryption=none&type=ws&host=${DOMAIN}#${user}"
@@ -56,8 +53,9 @@ echo "$vlesslink"
 echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
 
 # Restart Xray
-pkill xray
-/usr/local/bin/xray run -config /etc/xray/config.json &
+pkill -9 xray 2>/dev/null
+sleep 1
+/usr/local/bin/xray run -config /etc/xray/config.json > /dev/null 2>&1 &
 
 echo ""
 read -n 1 -s -r -p "Press any key to return to menu..."

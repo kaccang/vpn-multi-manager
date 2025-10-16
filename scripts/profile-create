@@ -209,17 +209,17 @@ cat > "$PROFILES_DIR/$profile_name/config.json" <<'XRAYEOF'
   "log": {"loglevel": "error"},
   "inbounds": [
     {"listen": "0.0.0.0", "port": 10001, "protocol": "vless",
-     "settings": {"decryption": "none", "clients": [{"id": "placeholder-uuid"
+     "settings": {"decryption": "none", "clients": [
 #vless
-     }]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/vless"}}},
+     ]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/vless"}}},
     {"listen": "0.0.0.0", "port": 10002, "protocol": "vmess",
-     "settings": {"clients": [{"id": "placeholder-uuid", "alterId": 0
+     "settings": {"clients": [
 #vmess
-     }]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/vmess"}}},
+     ]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/vmess"}}},
     {"listen": "0.0.0.0", "port": 10003, "protocol": "trojan",
-     "settings": {"clients": [{"password": "placeholder-password"
+     "settings": {"clients": [
 #trojanws
-     }]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/trojan-ws"}}}
+     ]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/trojan-ws"}}}
   ],
   "outbounds": [{"protocol": "freedom", "tag": "direct"}]
 }

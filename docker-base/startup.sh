@@ -8,13 +8,17 @@ echo "Starting VPN Profile Container..."
 /usr/sbin/sshd -D &
 echo "✓ SSH server started"
 
-# Initialize vnstat database (eth0 interface)
+# Initialize vnstat database (wait for eth0 to be ready)
+sleep 2
 if [ ! -f /var/lib/vnstat/vnstat.db ]; then
-    vnstat --create -i eth0 2>/dev/null && echo "✓ vnstat database initialized" || true
+    vnstat --create -i eth0 2>/dev/null && echo "✓ vnstat database initialized" || echo "⚠ vnstat init skipped"
 fi
 
+# Fix vnstat database permissions
+chmod 644 /var/lib/vnstat/vnstat.db 2>/dev/null || true
+
 # Start vnstat daemon
-/usr/bin/vnstatd -d
+/usr/bin/vnstatd -d 2>/dev/null
 echo "✓ vnstat daemon started"
 
 # Start Xray if config exists
