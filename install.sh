@@ -186,6 +186,10 @@ mkdir -p $INSTALL_DIR/{profiles,backups/{per-profile,global},logs}
 
 # Configure Nginx
 echo -e "${YELLOW}[10/12] Configuring Nginx...${NC}"
+
+# Remove conflicting default configs
+rm -f /etc/nginx/sites-enabled/default 2>/dev/null
+
 cat > /etc/nginx/sites-available/vpn-multi <<'NGINX'
 server {
     listen 80 default_server;
@@ -195,8 +199,14 @@ server {
 }
 NGINX
 
-ln -sf /etc/nginx/sites-available/vpn-multi /etc/nginx/sites-enabled/ 2>/dev/null
-nginx -t && systemctl reload nginx
+ln -sf /etc/nginx/sites-available/vpn-multi /etc/nginx/sites-enabled/
+
+if nginx -t 2>/dev/null; then
+    systemctl reload nginx
+    echo -e "${GREEN}✓ Nginx configured${NC}"
+else
+    echo -e "${YELLOW}⚠ Nginx config has issues, but continuing...${NC}"
+fi
 
 # Change SSH port for security
 echo -e "${YELLOW}[11/12] Changing SSH port to 4444 (security)...${NC}"
@@ -214,7 +224,19 @@ if ! grep -q "^Port $SSH_PORT" /etc/ssh/sshd_config; then
     echo "Port $SSH_PORT" >> /etc/ssh/sshd_config
 fi
 
-echo -e "${GREEN}✓ SSH port changed to $SSH_PORT${NC}"
+echo -e "${GREEN}✓ SSH port changed to $SSH_PORT in config${NC}"
+
+# Fix systemd socket activation (Ubuntu 24.04+ issue)
+echo -e "${YELLOW}Disabling SSH socket activation...${NC}"
+if systemctl list-unit-files | grep -q "ssh.socket"; then
+    systemctl stop ssh.socket 2>/dev/null || true
+    systemctl disable ssh.socket 2>/dev/null || true
+    systemctl mask ssh.socket 2>/dev/null || true
+    echo -e "${GREEN}✓ SSH socket disabled${NC}"
+fi
+
+# Enable SSH service directly
+systemctl enable ssh.service 2>/dev/null || systemctl enable sshd.service 2>/dev/null || true
 
 # Setup firewall
 echo -e "${YELLOW}[12/12] Configuring firewall...${NC}"
@@ -237,8 +259,38 @@ fi
 
 # Restart SSH service
 echo -e "${YELLOW}Restarting SSH service...${NC}"
-systemctl restart sshd || systemctl restart ssh
-echo -e "${GREEN}✓ SSH service restarted${NC}"
+
+# Detect and restart SSH service
+if systemctl list-units --type=service | grep -q "ssh.service"; then
+    if systemctl restart ssh 2>/dev/null; then
+        echo -e "${GREEN}✓ SSH service restarted (ssh)${NC}"
+    else
+        echo -e "${RED}✗ Failed to restart SSH service${NC}"
+    fi
+elif systemctl list-units --type=service | grep -q "sshd.service"; then
+    if systemctl restart sshd 2>/dev/null; then
+        echo -e "${GREEN}✓ SSH service restarted (sshd)${NC}"
+    else
+        echo -e "${RED}✗ Failed to restart SSH service${NC}"
+    fi
+else
+    echo -e "${RED}✗ SSH service not found${NC}"
+    # Try both anyway
+    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+fi
+
+# Verify SSH port is listening
+echo -e "${YELLOW}Verifying SSH port $SSH_PORT...${NC}"
+sleep 3
+
+if ss -tlnp | grep -q ":$SSH_PORT"; then
+    echo -e "${GREEN}✓ SSH port $SSH_PORT is active and listening${NC}"
+else
+    echo -e "${RED}✗ WARNING: SSH port $SSH_PORT is NOT listening!${NC}"
+    echo -e "${YELLOW}  Your current session will stay active${NC}"
+    echo -e "${YELLOW}  But you may not be able to reconnect on port $SSH_PORT${NC}"
+    echo -e "${YELLOW}  Rollback command: sed -i 's/^Port $SSH_PORT/Port 22/' /etc/ssh/sshd_config && systemctl restart ssh${NC}"
+fi
 
 # Cleanup
 rm -rf /tmp/vpn-multi
