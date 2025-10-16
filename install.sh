@@ -128,21 +128,36 @@ fi
 # Download system files
 echo -e "${YELLOW}[7/10] Downloading VPN Multi-Profile System...${NC}"
 rm -rf /tmp/vpn-multi
-git clone --depth 1 $REPO_URL /tmp/vpn-multi -q
 
-if [ ! -d /tmp/vpn-multi ]; then
+if ! git clone --depth 1 $REPO_URL /tmp/vpn-multi 2>/dev/null; then
     echo -e "${RED}✗ Failed to download from GitHub${NC}"
-    echo "Please check repo URL: $REPO_URL"
+    echo "Repository: $REPO_URL"
+    echo "Please check:"
+    echo "  1. Repository exists and is public"
+    echo "  2. URL is correct"
+    echo "  3. Internet connection is working"
     exit 1
 fi
+
+if [ ! -d /tmp/vpn-multi ]; then
+    echo -e "${RED}✗ Download directory not created${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Repository downloaded successfully${NC}"
 
 # Install system
 echo -e "${YELLOW}[8/10] Installing system files...${NC}"
 mkdir -p $INSTALL_DIR
-cp -r /tmp/vpn-multi/* $INSTALL_DIR/
-chmod +x $INSTALL_DIR/scripts/*
-chmod +x $INSTALL_DIR/docker-base/*.sh
-chmod +x $INSTALL_DIR/docker-base/container-scripts/*
+
+# Copy all files including hidden files (.env.example, .gitignore)
+cp -r /tmp/vpn-multi/. $INSTALL_DIR/
+
+chmod +x $INSTALL_DIR/scripts/* 2>/dev/null || true
+chmod +x $INSTALL_DIR/docker-base/*.sh 2>/dev/null || true
+chmod +x $INSTALL_DIR/docker-base/container-scripts/* 2>/dev/null || true
+
+echo -e "${GREEN}✓ System files installed${NC}"
 
 # Create symlinks
 ln -sf $INSTALL_DIR/scripts/profile-create /usr/local/bin/profile-create
