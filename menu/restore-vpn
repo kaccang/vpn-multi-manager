@@ -1,0 +1,86 @@
+#!/bin/bash
+
+# Membersihkan layar
+xp
+clear
+sleep $((RANDOM % 20))
+
+# Header
+echo -e "\033[1;93m─────────────────────────────────────────\033[0m"
+echo -e "\e[44m         VPN CONFIGURATION RESTORE         \E[0m"
+echo -e "\033[1;93m─────────────────────────────────────────\033[0m"
+
+# Input file backup
+read -p "Enter backup file path or URL: " backup_source
+
+# Temporary file
+temp_file="/tmp/vpn-restore-$(date +%s).zip"
+
+# Download jika berupa URL
+if [[ "$backup_source" =~ ^https?:// ]]; then
+    echo "Downloading backup file..."
+    wget -qO "$temp_file" "$backup_source"
+    
+    if [ $? -ne 0 ]; then
+        echo "Failed to download backup file!"
+        exit 1
+    fi
+    
+    restore_file="$temp_file"
+else
+    if [ ! -f "$backup_source" ]; then
+        echo "Backup file not found!"
+        exit 1
+    fi
+    restore_file="$backup_source"
+fi
+
+# Validasi file zip
+if ! unzip -tq "$restore_file" >/dev/null 2>&1; then
+    echo "Invalid zip file: $restore_file"
+    [ -f "$temp_file" ] && rm -f "$temp_file"
+    exit 1
+fi
+
+# Backup konfigurasi saat ini
+timestamp=$(date +"%Y%m%d-%H%M%S")
+current_backup="/root/vpn-backup-before-restore-$timestamp.zip"
+echo "Creating current config backup: $current_backup"
+cd /etc/xray/
+zip -r "$current_backup" . >/dev/null 2>&1
+
+# Stop layanan xray
+echo "Stopping xray service..."
+systemctl stop xray
+
+# Kosongkan log dengan cara yang lebih aman
+echo "Clearing log files..."
+echo "" > /var/log/xray/access.log
+echo "" > /var/log/xray/error.log
+
+# Ekstrak file backup
+echo "Restoring configuration..."
+unzip -o "$restore_file" -d /etc/xray/ >/dev/null 2>&1
+
+# Restore vnstat database jika ada
+if [ -f "/etc/xray/vnstat.db" ]; then
+    echo "Restoring vnstat database..."
+    systemctl stop vnstat
+    cp /etc/xray/vnstat.db /var/lib/vnstat/vnstat.db
+    chown vnstat:vnstat /var/lib/vnstat/vnstat.db
+    systemctl start vnstat
+fi
+
+# Start layanan xray
+echo "Starting xray service..."
+systemctl start xray
+
+# Bersihkan file temporary
+[ -f "$temp_file" ] && rm -f "$temp_file"
+
+# Footer
+echo -e "\033[1;92mRestore completed successfully!\033[0m"
+echo -e "\033[1;93m─────────────────────────────────────────\033[0m"
+echo "Original config backed up to: $current_backup"
+echo -e "\033[1;93m─────────────────────────────────────────\033[0m"
+read -n 1 -s -r -p "Press any key to continue"

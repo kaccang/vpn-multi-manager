@@ -1,0 +1,36 @@
+#!/bin/bash
+DOMAIN_FILE="/etc/xray/domain"
+
+if [[ ! -f "$DOMAIN_FILE" ]]; then
+    echo "Error: Domain file not found at $DOMAIN_FILE"
+    exit 1
+fi
+
+DOMAIN=$(cat "$DOMAIN_FILE")
+if [[ -z "$DOMAIN" ]]; then
+    echo "Error: Domain name is empty in $DOMAIN_FILE"
+    exit 1
+fi
+
+echo "Starting SSL certificate creation for $DOMAIN"
+
+# Hentikan nginx biar port 80 bebas
+systemctl stop nginx
+
+# Issue baru pakai acme.sh (Let’s Encrypt ECC)
+~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+~/.acme.sh/acme.sh --register-account -m admin@${DOMAIN#*.} || true
+~/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone -k ec-256 --force
+
+# Install ke jalur Xray
+~/.acme.sh/acme.sh --installcert -d "$DOMAIN" --ecc \
+    --fullchainpath /etc/xray/xray.crt \
+    --keypath /etc/xray/xray.key \
+    --reloadcmd "systemctl restart xray"
+
+# Start ulang service
+systemctl daemon-reload
+systemctl start nginx
+systemctl restart xray
+
+echo "SSL certificate creation completed for $DOMAIN"

@@ -1,0 +1,76 @@
+#!/bin/bash
+
+clear
+CONFIG="/etc/xray/config.json"
+
+echo -e "\033[1;36m╔══════════════════════════════════════════╗\033[0m"
+echo -e "\033[1;36m║         RENEW TROJAN ACCOUNT             ║\033[0m"
+echo -e "\033[1;36m╚══════════════════════════════════════════╝\033[0m"
+echo ""
+
+mapfile -t entries < <(grep -E '^#!' "$CONFIG" | awk '!seen[$2]++')
+
+if [ ${#entries[@]} -eq 0 ]; then
+    echo "No Trojan accounts found."
+    read -n 1 -s -r -p "Press any key to return to menu..."
+    /root/scripts/menu
+    exit 0
+fi
+
+echo "Existing Trojan Accounts:"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+for i in "${!entries[@]}"; do
+    user=$(echo "${entries[$i]}" | awk '{print $2}')
+    exp=$(echo "${entries[$i]}" | awk '{print $3}')
+    printf "  %2d. %-20s (Exp: %s)\n" $((i+1)) "$user" "$exp"
+done
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+read -p "Select account to renew [1-${#entries[@]}]: " num
+
+if [ "$num" -lt 1 ] || [ "$num" -gt ${#entries[@]} ]; then
+    echo "Invalid selection!"
+    sleep 2
+    /root/scripts/menu
+    exit 1
+fi
+
+line="${entries[$((num-1))]}"
+user=$(echo "$line" | awk '{print $2}')
+old_exp=$(echo "$line" | awk '{print $3}')
+
+echo ""
+read -p "Add how many days? " add_days
+
+if ! [[ "$add_days" =~ ^[0-9]+$ ]]; then
+    echo "Invalid number!"
+    sleep 2
+    /root/scripts/menu
+    exit 1
+fi
+
+now=$(date +%s)
+old_exp_sec=$(date -d "$old_exp" +%s 2>/dev/null || echo $now)
+
+if [ $old_exp_sec -lt $now ]; then
+    new_exp=$(date -d "+${add_days} days" +"%Y-%m-%d")
+else
+    new_exp=$(date -d "$old_exp +${add_days} days" +"%Y-%m-%d")
+fi
+
+sed -i "s/^#! $user $old_exp/#! $user $new_exp/" "$CONFIG"
+
+clear
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+echo -e "\033[1;32m        ACCOUNT RENEWED SUCCESSFULLY       \033[0m"
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+echo -e "User        : \033[1;33m$user\033[0m"
+echo -e "Old Expiry  : \033[1;33m$old_exp\033[0m"
+echo -e "New Expiry  : \033[1;32m$new_exp\033[0m"
+echo -e "Extended    : \033[1;32m$add_days days\033[0m"
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+
+echo ""
+read -n 1 -s -r -p "Press any key to return to menu..."
+/root/scripts/menu

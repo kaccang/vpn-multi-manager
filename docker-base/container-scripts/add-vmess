@@ -1,0 +1,100 @@
+#!/bin/bash
+
+clear
+CONFIG="/etc/xray/config.json"
+DOMAIN=$(cat /etc/xray/domain)
+
+echo -e "\033[1;36m╔══════════════════════════════════════════╗\033[0m"
+echo -e "\033[1;36m║          ADD VMESS ACCOUNT               ║\033[0m"
+echo -e "\033[1;36m╚══════════════════════════════════════════╝\033[0m"
+echo ""
+
+# Input username
+until [[ $user =~ ^[a-zA-Z0-9_]+$ && ${CLIENT_EXISTS} == '0' ]]; do
+    read -rp "Username: " -e user
+    CLIENT_EXISTS=$(grep -w "### $user" "$CONFIG" | wc -l)
+
+    if [[ ${CLIENT_EXISTS} == '1' ]]; then
+        echo -e "\033[1;31mUsername already exists! Choose another name.\033[0m"
+        echo ""
+    fi
+done
+
+# Generate UUID
+uuid=$(cat /proc/sys/kernel/random/uuid)
+
+# Input expiry days
+read -p "Expired (days): " masaaktif
+exp=$(date -d "$masaaktif days" +"%Y-%m-%d")
+
+# Add to config
+sed -i "/#vmess$/a\### $user $exp\n},{ \"id\": \"$uuid\", \"alterId\": 0, \"email\": \"$user\"" "$CONFIG"
+
+# Generate VMess links
+VMESS_WS=$(cat<<EOF
+{
+  "v": "2",
+  "ps": "$user",
+  "add": "$DOMAIN",
+  "port": "443",
+  "id": "$uuid",
+  "aid": "0",
+  "net": "ws",
+  "path": "/vmess",
+  "type": "none",
+  "host": "$DOMAIN",
+  "tls": "tls"
+}
+EOF
+)
+
+VMESS_NON_TLS=$(cat<<EOF
+{
+  "v": "2",
+  "ps": "$user",
+  "add": "$DOMAIN",
+  "port": "80",
+  "id": "$uuid",
+  "aid": "0",
+  "net": "ws",
+  "path": "/vmess",
+  "type": "none",
+  "host": "$DOMAIN",
+  "tls": "none"
+}
+EOF
+)
+
+vmesslink1="vmess://$(echo $VMESS_WS | base64 -w 0)"
+vmesslink2="vmess://$(echo $VMESS_NON_TLS | base64 -w 0)"
+
+clear
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+echo -e "\033[1;32m         VMESS ACCOUNT CREATED             \033[0m"
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+echo -e "Username    : \033[1;33m$user\033[0m"
+echo -e "Domain      : \033[1;33m$DOMAIN\033[0m"
+echo -e "Port TLS    : \033[1;33m443\033[0m"
+echo -e "Port Non-TLS: \033[1;33m80\033[0m"
+echo -e "UUID        : \033[1;33m$uuid\033[0m"
+echo -e "Encryption  : \033[1;33mnone\033[0m"
+echo -e "Network     : \033[1;33mWebSocket\033[0m"
+echo -e "Path        : \033[1;33m/vmess\033[0m"
+echo -e "Expired On  : \033[1;33m$exp\033[0m"
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+echo ""
+echo -e "\033[1;36mTLS Link:\033[0m"
+echo "$vmesslink1"
+echo ""
+echo -e "\033[1;36mNon-TLS Link:\033[0m"
+echo "$vmesslink2"
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+
+# Restart Xray - NO SYSTEMCTL!
+pkill -9 xray 2>/dev/null
+sleep 1
+/usr/local/bin/xray run -config /etc/xray/config.json &
+
+echo ""
+read -n 1 -s -r -p "Press any key to return to menu..."
+/root/scripts/menu

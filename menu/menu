@@ -1,0 +1,138 @@
+#!/bin/bash
+
+# Warna teks
+GREEN="\e[32m"
+CYAN="\e[36m"
+YELLOW="\e[33m"
+RED="\e[31m"
+NC="\e[0m"
+
+# Fungsi warna status
+status_color() {
+    case "$1" in
+        Running|Active) echo -e "${GREEN}$1${NC}" ;;
+        Failed|Inactive|Dead) echo -e "${RED}$1${NC}" ;;
+        *) echo -e "${YELLOW}$1${NC}" ;;
+    esac
+}
+
+# Ambil informasi sistem
+OS_INFO=$(lsb_release -ds 2>/dev/null || grep '^NAME=' /etc/os-release | cut -d\" -f2)
+KERNEL_INFO=$(uname -sr)
+UPTIME_INFO=$(uptime -p | sed 's/up //')
+DISK_USAGE=$(df -h / | awk 'NR==2 {print $2 " / " $3 " (" $5 ")"}')
+CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
+CPU_CORES=$(nproc)
+RAM_USED=$(free -m | awk '/Mem:/ {print $3}')
+RAM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
+ISP=$(cat /etc/xray/isp 2>/dev/null || echo "Unknown")
+
+# Ambil IP publik
+IP=$(curl -s -4 ifconfig.me)
+
+# Cek masa berlaku lisensi
+license_info=$(curl -s https://s3.tebi.io/v2ray/v1/license.txt)
+expiration_date=$(echo "$license_info" | grep -w "$IP" | awk '{print $2}' | sort -r | head -n1)
+
+days=0
+if [[ -n "$expiration_date" ]]; then
+    exp_sec=$(date -d "$expiration_date" +%s 2>/dev/null)
+    now_sec=$(date +%s)
+    if [[ "$exp_sec" =~ ^[0-9]+$ ]]; then
+        diff_sec=$((exp_sec - now_sec))
+        days=$((diff_sec / 86400))
+        (( days < 0 )) && days=0
+    fi
+fi
+
+# Kontrol layanan xray berdasarkan lisensi
+if [[ $days -eq 0 ]]; then
+    systemctl disable xray >/dev/null 2>&1
+    systemctl stop xray >/dev/null 2>&1
+    xray_STATUS=$(status_color "Expired")
+else
+    if ! systemctl is-active --quiet xray; then
+        systemctl enable xray >/dev/null 2>&1
+        systemctl start xray >/dev/null 2>&1
+    fi
+    xray_STATUS=$(status_color "$(systemctl is-active xray | sed 's/active/Running/;s/inactive/Inactive/;s/failed/Failed/')") 
+fi
+
+NGINX_STATUS=$(status_color "$(systemctl is-active nginx | sed 's/active/Running/;s/inactive/Inactive/;s/failed/Failed/')")
+
+# Hitung jumlah akun
+VMESS_COUNT=$(grep '^### ' /etc/xray/config.json | awk '{print $2}' | sort -u | wc -l)
+VLESS_COUNT=$(grep '^#& ' /etc/xray/config.json | awk '{print $2}' | sort -u | wc -l)
+TROJAN_COUNT=$(grep '^#! ' /etc/xray/config.json | awk '{print $2}' | sort -u | wc -l)
+
+clear
+echo "--------------------------------------------"
+echo "           SYSTEM INFORMATION               "
+echo "--------------------------------------------"
+echo -e " ${GREEN}OS          :${NC} $OS_INFO"
+echo -e " ${GREEN}Kernel      :${NC} $KERNEL_INFO"
+echo -e " ${GREEN}Uptime      :${NC} $UPTIME_INFO"
+echo -e " ${CYAN}CPU         :${NC} $CPU_MODEL ($CPU_CORES cores)"
+echo -e " ${CYAN}Disk Usage  :${NC} $DISK_USAGE"
+echo -e " ${CYAN}RAM Usage   :${NC} ${RAM_USED}MB / ${RAM_TOTAL}MB"
+echo -e " ${YELLOW}Organization:${NC} $ISP"
+echo "--------------------------------------------"
+echo "           SERVICE STATUS                   "
+echo "--------------------------------------------"
+echo -e " Nginx Status    : $NGINX_STATUS"
+echo -e " Vmess Status    : $xray_STATUS"
+echo -e " Vless Status    : $xray_STATUS"
+echo -e " Trojan Status   : $xray_STATUS"
+echo -e " Expired Lisense : $(if [ $days -eq 0 ]; then echo -e "${RED}0 days (EXPIRED)${NC}"; else echo -e "${GREEN}${days} days${NC}"; fi)"
+echo "--------------------------------------------"
+
+# Jika expired, langsung exit
+if [[ $days -eq 0 ]]; then
+    echo -e "${RED}           LISENSI EXPIRED${NC}"
+    echo "--------------------------------------------"
+    echo -e "${RED} Hubungi admin untuk perpanjangan: t.me/Hemat3D${NC}"
+    echo "--------------------------------------------"
+    exit 0
+fi
+
+# Tampilkan status akun
+echo -e ""
+echo -e "┌────────────────────────────────────────────┐"
+echo -e "│            XRAY VPN ACCOUNT STATUS         │"
+echo -e "├────────────────────────────────────────────┤"
+printf "│  VMess  : ${GREEN}%-3s${NC}   VLess : ${YELLOW}%-3s${NC}   Trojan : ${CYAN}%-3s${NC} │\n" "$VMESS_COUNT" "$VLESS_COUNT" "$TROJAN_COUNT"
+echo -e "└────────────────────────────────────────────┘"
+echo ""
+
+# Menu utama
+echo "                  MAIN MENU                 "
+echo "--------------------------------------------"
+echo "  1. Create Vmess"
+echo "  2. Delete Vmess"
+echo "  3. Renew Vmess"
+echo "  4. Check Vmess"
+echo "  5. Reboot Server"
+echo "  6. Restart Services"
+echo "  7. Check User Vmess"
+echo "--------------------------------------------"
+
+read -p "Select an option [1 - 7]: " menu
+case $menu in
+    1) add-ws ;;
+    2) del-ws ;;
+    3) renew-ws ;;
+    4) cek-ws ;;
+    5) sleep 3 && reboot ;;
+    6)
+        clear
+        echo -e "\nRestarting all services..."
+        systemctl restart ssh && echo "SSH restarted."
+        systemctl restart xray && echo "Xray restarted."
+        systemctl restart nginx && echo "Nginx restarted."
+        echo -e "\nAll services restarted!"
+        read -p "Press Enter to return to menu..."
+        menu
+        ;;
+    7) user-ws ;;
+    *) echo "Invalid option, please try again." ;;
+esac

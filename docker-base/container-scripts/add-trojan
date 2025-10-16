@@ -1,0 +1,60 @@
+#!/bin/bash
+
+clear
+CONFIG="/etc/xray/config.json"
+DOMAIN=$(cat /etc/xray/domain)
+
+echo -e "\033[1;36m╔══════════════════════════════════════════╗\033[0m"
+echo -e "\033[1;36m║          ADD TROJAN ACCOUNT              ║\033[0m"
+echo -e "\033[1;36m╚══════════════════════════════════════════╝\033[0m"
+echo ""
+
+# Input username
+until [[ $user =~ ^[a-zA-Z0-9_]+$ && ${CLIENT_EXISTS} == '0' ]]; do
+    read -rp "Username: " -e user
+    CLIENT_EXISTS=$(grep -w "#! $user" "$CONFIG" | wc -l)
+
+    if [[ ${CLIENT_EXISTS} == '1' ]]; then
+        echo -e "\033[1;31mUsername already exists! Choose another name.\033[0m"
+        echo ""
+    fi
+done
+
+# Generate password (UUID format)
+password=$(cat /proc/sys/kernel/random/uuid)
+
+# Input expiry days
+read -p "Expired (days): " masaaktif
+exp=$(date -d "$masaaktif days" +"%Y-%m-%d")
+
+# Add to config
+sed -i "/#trojanws$/a\#! $user $exp\n},{ \"password\": \"$password\", \"email\": \"$user\"" "$CONFIG"
+
+# Generate Trojan link
+trojanlink="trojan://${password}@${DOMAIN}:443?path=/trojan-ws&security=tls&type=ws&host=${DOMAIN}#${user}"
+
+clear
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+echo -e "\033[1;32m        TROJAN ACCOUNT CREATED             \033[0m"
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+echo -e "Username    : \033[1;33m$user\033[0m"
+echo -e "Domain      : \033[1;33m$DOMAIN\033[0m"
+echo -e "Port        : \033[1;33m443\033[0m"
+echo -e "Password    : \033[1;33m$password\033[0m"
+echo -e "Network     : \033[1;33mWebSocket\033[0m"
+echo -e "Path        : \033[1;33m/trojan-ws\033[0m"
+echo -e "Security    : \033[1;33mTLS\033[0m"
+echo -e "Expired On  : \033[1;33m$exp\033[0m"
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+echo ""
+echo -e "\033[1;36mTrojan Link:\033[0m"
+echo "$trojanlink"
+echo -e "\033[1;32m═══════════════════════════════════════════\033[0m"
+
+# Restart Xray
+pkill xray
+/usr/local/bin/xray run -config /etc/xray/config.json &
+
+echo ""
+read -n 1 -s -r -p "Press any key to return to menu..."
+/root/scripts/menu

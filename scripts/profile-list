@@ -1,0 +1,77 @@
+#!/bin/bash
+
+##############################################
+# VPN Multi-Profile System - List Profiles
+##############################################
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+BASE_DIR="/opt/vpn-multi"
+PROFILES_DIR="$BASE_DIR/profiles"
+
+clear
+echo -e "${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║                                                      ║${NC}"
+echo -e "${CYAN}║              VPN PROFILE LIST                        ║${NC}"
+echo -e "${CYAN}║                                                      ║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+if [ ! -d "$PROFILES_DIR" ] || [ -z "$(ls -A $PROFILES_DIR 2>/dev/null)" ]; then
+    echo -e "${YELLOW}No profiles found.${NC}"
+    echo ""
+    echo "Create your first profile with: profile-create"
+    exit 0
+fi
+
+# Header
+printf "%-5s %-20s %-30s %-10s %-10s %-10s %-15s\n" "No" "Name" "Domain" "CPU" "RAM" "SSH Port" "Status"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+counter=1
+for profile_dir in $PROFILES_DIR/*/; do
+    profile_name=$(basename "$profile_dir")
+
+    # Read profile config
+    if [ -f "$profile_dir/profile.conf" ]; then
+        source "$profile_dir/profile.conf"
+
+        # Check container status
+        container_name="vpn-${profile_name}"
+        if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+            status="${GREEN}Running${NC}"
+        elif docker ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
+            status="${YELLOW}Stopped${NC}"
+        else
+            status="Not Created"
+        fi
+
+        printf "%-5s %-20s %-30s %-10s %-10s %-10s %-15b\n" \
+            "$counter" \
+            "$PROFILE_NAME" \
+            "$DOMAIN" \
+            "${CPU_PERCENT}%" \
+            "${RAM_MB}MB" \
+            "$SSH_PORT" \
+            "$status"
+    else
+        printf "%-5s %-20s %-30s %-10s %-10s %-10s %-15s\n" \
+            "$counter" \
+            "$profile_name" \
+            "N/A" \
+            "N/A" \
+            "N/A" \
+            "N/A" \
+            "Unknown"
+    fi
+
+    ((counter++))
+done
+
+echo ""
+echo -e "${CYAN}Total profiles: ${GREEN}$((counter-1))${NC}"
+echo ""

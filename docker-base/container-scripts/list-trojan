@@ -1,0 +1,28 @@
+#!/bin/bash
+
+clear
+CONFIG="/etc/xray/config.json"
+
+echo -e "\033[1;36m╔══════════════════════════════════════════╗\033[0m"
+echo -e "\033[1;36m║        LIST TROJAN ACCOUNTS              ║\033[0m"
+echo -e "\033[1;36m╚══════════════════════════════════════════╝\033[0m"
+echo ""
+
+mapfile -t entries < <(grep -E '^#!' "$CONFIG" | awk '!seen[$2]++')
+
+if [ ${#entries[@]} -eq 0 ]; then
+    echo "No Trojan accounts found."
+else
+    printf "%-5s %-20s %-15s\n" "No" "Username" "Expired"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    for i in "${!entries[@]}"; do
+        user=$(echo "${entries[$i]}" | awk '{print $2}')
+        exp=$(echo "${entries[$i]}" | awk '{print $3}')
+        printf "%-5s %-20s %-15s\n" "$((i+1))" "$user" "$exp"
+    done
+fi
+
+echo ""
+read -n 1 -s -r -p "Press any key to return to menu..."
+/root/scripts/menu

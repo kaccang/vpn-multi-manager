@@ -1,0 +1,65 @@
+# VPN Multi-Profile System - Git Ignore
+
+# Environment variables (SENSITIVE!)
+.env
+*.env
+!.env.example
+
+# Profiles data (contains client data)
+profiles/
+backups/
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+
+# SSL certificates (SENSITIVE!)
+*.pem
+*.key
+*.crt
+*.csr
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker volumes
+.docker/
+
+# Queue files
+.ssl_queue
+.ssl_lock
+
+# History
+history.md
+
+# Backup archives
+*.tar.gz
+*.tar.gz.enc
+*.zip
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.sublime-*
+
+# Python cache (if any scripts use python)
+__pycache__/
+*.pyc
+*.pyo
+
+# Node modules (if any)
+node_modules/
+
+# OS files
+Thumbs.db
+.Spotlight-V100
+.Trashes

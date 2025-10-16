@@ -1,0 +1,199 @@
+#!/bin/bash
+
+##############################################
+# VPN Multi-Profile System
+# Restore from Backup (rclone or S3)
+##############################################
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+BASE_DIR="/opt/vpn-multi"
+PROFILES_DIR="$BASE_DIR/profiles"
+BACKUP_DIR="$BASE_DIR/backups"
+ENV_FILE="$BASE_DIR/.env"
+
+# Load environment
+[ -f "$ENV_FILE" ] && source "$ENV_FILE"
+
+# Function: List backups from rclone
+list_rclone_backups() {
+    local remote="$1"
+    local path="$2"
+
+    rclone lsf "${remote}:${path}/" | sort -r
+}
+
+# Function: Download from rclone
+download_rclone() {
+    local remote="$1"
+    local path="$2"
+    local filename="$3"
+    local dest="$4"
+
+    rclone copy "${remote}:${path}/${filename}" "$dest/" --progress
+}
+
+# Function: Decrypt backup
+decrypt_backup() {
+    local encrypted_file="$1"
+    local decrypted_file="${encrypted_file%.enc}"
+
+    if [[ "$encrypted_file" == *.enc ]]; then
+        echo -e "  File is encrypted, decrypting..." >&2
+
+        if [ -z "$BACKUP_ENCRYPTION_PASSWORD" ]; then
+            echo -e "${RED}✗ Encryption password not set in .env!${NC}" >&2
+            return 1
+        fi
+
+        # Try with pbkdf2 first (new format)
+        if openssl enc -aes-256-cbc -pbkdf2 -d -in "$encrypted_file" -out "$decrypted_file" -k "$BACKUP_ENCRYPTION_PASSWORD" 2>/dev/null; then
+            rm "$encrypted_file"
+            echo -e "  ${GREEN}✓ Decrypted successfully${NC}" >&2
+            echo "$decrypted_file"
+            return 0
+        fi
+
+        # Try without pbkdf2 (old format compatibility)
+        echo -e "  ${YELLOW}Trying legacy decryption method...${NC}" >&2
+        if openssl enc -aes-256-cbc -d -in "$encrypted_file" -out "$decrypted_file" -k "$BACKUP_ENCRYPTION_PASSWORD" 2>/dev/null; then
+            rm "$encrypted_file"
+            echo -e "  ${GREEN}✓ Decrypted successfully (legacy)${NC}" >&2
+            echo "$decrypted_file"
+            return 0
+        fi
+
+        echo -e "${RED}✗ Decryption failed! Check password in .env${NC}" >&2
+        return 1
+    else
+        echo -e "  File is not encrypted" >&2
+        echo "$encrypted_file"
+        return 0
+    fi
+}
+
+# Function: Restore profile
+restore_profile() {
+    local backup_source="$1"  # "primary" or "secondary"
+
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║          RESTORE PROFILE FROM BACKUP                 ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    # Select source
+    if [ "$backup_source" == "primary" ]; then
+        remote="$BACKUP_PRIMARY_REMOTE"
+        path="$BACKUP_PRIMARY_PATH"
+        type="$BACKUP_PRIMARY_TYPE"
+    else
+        remote="$BACKUP_SECONDARY_REMOTE"
+        path="$BACKUP_SECONDARY_PATH"
+        type="$BACKUP_SECONDARY_TYPE"
+    fi
+
+    # List available backups
+    echo -e "${YELLOW}Available backups from $backup_source ($type):${NC}"
+    echo ""
+
+    if [ "$type" == "rclone" ]; then
+        backups=($(list_rclone_backups "$remote" "$path"))
+    else
+        echo -e "${RED}S3 listing not implemented yet. Use rclone for now.${NC}"
+        exit 1
+    fi
+
+    if [ ${#backups[@]} -eq 0 ]; then
+        echo -e "${RED}No backups found!${NC}"
+        exit 1
+    fi
+
+    # Show list
+    for i in "${!backups[@]}"; do
+        printf "  %2d. %s\n" $((i+1)) "${backups[$i]}"
+    done
+
+    echo ""
+    read -p "Select backup number: " backup_num
+
+    if [ "$backup_num" -lt 1 ] || [ "$backup_num" -gt ${#backups[@]} ]; then
+        echo -e "${RED}Invalid selection!${NC}"
+        exit 1
+    fi
+
+    selected_backup="${backups[$((backup_num-1))]}"
+
+    # Download backup
+    echo ""
+    echo -e "${YELLOW}[1/4] Downloading backup: $selected_backup${NC}"
+    mkdir -p "$BACKUP_DIR/tmp"
+
+    if [ "$type" == "rclone" ]; then
+        download_rclone "$remote" "$path" "$selected_backup" "$BACKUP_DIR/tmp"
+    fi
+
+    local downloaded_file="$BACKUP_DIR/tmp/$selected_backup"
+
+    if [ ! -f "$downloaded_file" ]; then
+        echo -e "${RED}Download failed!${NC}"
+        exit 1
+    fi
+
+    # Decrypt
+    echo -e "${YELLOW}[2/4] Decrypting backup...${NC}"
+    downloaded_file=$(decrypt_backup "$downloaded_file")
+
+    # Extract
+    echo -e "${YELLOW}[3/4] Extracting backup...${NC}"
+    tar -xzf "$downloaded_file" -C "$BACKUP_DIR/tmp/"
+
+    # Get profile name from extracted directory
+    extracted_dir=$(tar -tzf "$downloaded_file" | head -1 | cut -f1 -d"/")
+    profile_name="$extracted_dir"
+
+    # Restore
+    echo -e "${YELLOW}[4/4] Restoring profile: $profile_name${NC}"
+
+    if [ -d "$PROFILES_DIR/$profile_name" ]; then
+        read -p "Profile exists. Overwrite? [Y/N]: " overwrite
+        [[ ! "$overwrite" =~ ^[Yy]$ ]] && { echo "Cancelled."; exit 0; }
+        rm -rf "$PROFILES_DIR/$profile_name"
+    fi
+
+    mv "$BACKUP_DIR/tmp/$extracted_dir" "$PROFILES_DIR/"
+
+    # Restart container
+    cd "$PROFILES_DIR/$profile_name"
+    docker-compose up -d
+
+    # Cleanup
+    rm -rf "$BACKUP_DIR/tmp"/*
+
+    echo ""
+    echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║        RESTORE COMPLETED SUCCESSFULLY!               ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "Profile: ${YELLOW}$profile_name${NC}"
+    echo -e "Status : ${GREEN}Running${NC}"
+}
+
+# Main
+case "$1" in
+    primary)
+        restore_profile "primary"
+        ;;
+    secondary)
+        restore_profile "secondary"
+        ;;
+    *)
+        echo -e "${CYAN}Usage:${NC}"
+        echo "  $0 primary      - Restore from primary backup"
+        echo "  $0 secondary    - Restore from secondary backup"
+        ;;
+esac

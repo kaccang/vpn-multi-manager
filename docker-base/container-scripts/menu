@@ -1,0 +1,139 @@
+#!/bin/bash
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+clear
+echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║         VPN PROFILE MANAGEMENT           ║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}"
+echo ""
+
+# Load profile config
+if [ -f /etc/xray/profile.conf ]; then
+    source /etc/xray/profile.conf
+    DOMAIN=$(cat /etc/xray/domain 2>/dev/null || echo "Not configured")
+    PROFILE_NAME=$(hostname)
+else
+    DOMAIN=$(cat /etc/xray/domain 2>/dev/null || echo "Not configured")
+    PROFILE_NAME=$(hostname)
+    EXPIRED_DATE="Unknown"
+fi
+
+# Calculate days remaining
+if [ "$EXPIRED_DATE" != "Unknown" ]; then
+    NOW=$(date +%s)
+    EXPIRED_DATE_EPOCH=$(date -d "$EXPIRED_DATE" +%s 2>/dev/null || echo "0")
+    DAYS_REMAINING=$(( ($EXPIRED_DATE_EPOCH - $NOW) / 86400 ))
+
+    if [ "$DAYS_REMAINING" -lt 0 ]; then
+        EXPIRY_STATUS="${RED}EXPIRED ($((-$DAYS_REMAINING)) days overdue)${NC}"
+    elif [ "$DAYS_REMAINING" -le 5 ]; then
+        EXPIRY_STATUS="${YELLOW}$DAYS_REMAINING days remaining${NC}"
+    else
+        EXPIRY_STATUS="${GREEN}$DAYS_REMAINING days remaining${NC}"
+    fi
+else
+    EXPIRY_STATUS="${YELLOW}Unknown${NC}"
+fi
+
+# Get resource usage
+CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+RAM_USED=$(free -m | awk 'NR==2{printf "%.0f", $3}')
+RAM_TOTAL=$(free -m | awk 'NR==2{printf "%.0f", $2}')
+DISK_USAGE=$(df -h / | awk 'NR==2{print $5}')
+
+# Get Xray status
+if pgrep -x "xray" > /dev/null; then
+    XRAY_STATUS="${GREEN}Running${NC}"
+else
+    XRAY_STATUS="${RED}Stopped${NC}"
+fi
+
+# Count users by protocol
+VMESS_COUNT=$(grep -c '^###' /etc/xray/config.json 2>/dev/null || echo 0)
+VLESS_COUNT=$(grep -c '^#&' /etc/xray/config.json 2>/dev/null || echo 0)
+TROJAN_COUNT=$(grep -c '^#!' /etc/xray/config.json 2>/dev/null || echo 0)
+
+echo -e "${YELLOW}Profile Information:${NC}"
+echo -e "  Name         : $PROFILE_NAME"
+echo -e "  Domain       : $DOMAIN"
+echo -e "  Expiry       : $EXPIRED_DATE"
+echo -e "  Status       : $EXPIRY_STATUS"
+echo -e "  Xray Status  : $XRAY_STATUS"
+echo ""
+echo -e "${YELLOW}Resource Usage:${NC}"
+echo -e "  CPU Usage    : ${CPU_USAGE}%"
+echo -e "  RAM Usage    : ${RAM_USED}MB / ${RAM_TOTAL}MB"
+echo -e "  Disk Usage   : ${DISK_USAGE}"
+echo ""
+echo -e "${YELLOW}VPN Accounts:${NC}"
+echo -e "  VMess        : ${GREEN}${VMESS_COUNT}${NC}"
+echo -e "  VLess        : ${CYAN}${VLESS_COUNT}${NC}"
+echo -e "  Trojan       : ${YELLOW}${TROJAN_COUNT}${NC}"
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "${GREEN}VMess Management:${NC}"
+echo "  1) Add VMess Account"
+echo "  2) Delete VMess Account"
+echo "  3) List VMess Accounts"
+echo "  4) Renew VMess Account"
+echo "  5) Check VMess Account"
+echo ""
+echo -e "${CYAN}VLess Management:${NC}"
+echo "  6) Add VLess Account"
+echo "  7) Delete VLess Account"
+echo "  8) List VLess Accounts"
+echo "  9) Renew VLess Account"
+echo "  10) Check VLess Account"
+echo ""
+echo -e "${YELLOW}Trojan Management:${NC}"
+echo "  11) Add Trojan Account"
+echo "  12) Delete Trojan Account"
+echo "  13) List Trojan Accounts"
+echo "  14) Renew Trojan Account"
+echo "  15) Check Trojan Account"
+echo ""
+echo -e "${RED}System:${NC}"
+echo "  16) Restart Xray"
+echo "  17) View Logs"
+echo "  18) Traffic Stats (vnstat)"
+echo "  0) Exit"
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+read -p "Select option [0-18]: " menu
+
+case $menu in
+    1) /root/scripts/add-vmess ;;
+    2) /root/scripts/del-vmess ;;
+    3) /root/scripts/list-vmess ;;
+    4) /root/scripts/renew-vmess ;;
+    5) /root/scripts/check-vmess ;;
+    6) /root/scripts/add-vless ;;
+    7) /root/scripts/del-vless ;;
+    8) /root/scripts/list-vless ;;
+    9) /root/scripts/renew-vless ;;
+    10) /root/scripts/check-vless ;;
+    11) /root/scripts/add-trojan ;;
+    12) /root/scripts/del-trojan ;;
+    13) /root/scripts/list-trojan ;;
+    14) /root/scripts/renew-trojan ;;
+    15) /root/scripts/check-trojan ;;
+    16)
+        pkill -9 xray 2>/dev/null
+        sleep 1
+        /usr/local/bin/xray run -config /etc/xray/config.json &
+        echo "Xray restarted!"
+        sleep 2
+        /root/scripts/menu
+        ;;
+    17) tail -n 50 /var/log/xray/access.log && read -p "Press Enter to continue..." && /root/scripts/menu ;;
+    18) vnstat -h && read -p "Press Enter to continue..." && /root/scripts/menu ;;
+    0) exit ;;
+    *) echo "Invalid option!" && sleep 1 && /root/scripts/menu ;;
+esac

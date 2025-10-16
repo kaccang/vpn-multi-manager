@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# Membersihkan layar
+clear
+
+# Cek apakah file api.txt ada dan berisi token
+if [[ -f "api.txt" && -s "api.txt" ]]; then
+    API_TOKEN=$(cat api.txt)
+    USE_IPINFO=true
+else
+    API_TOKEN=""
+    USE_IPINFO=false
+fi
+
+# Header
+echo -e "\033[1;93m─────────────────────────────────────────\033[0m"
+echo -e "\e[42m      Vmess User Login Account  \E[0m"
+echo -e "\033[1;93m─────────────────────────────────────────\033[0m"
+
+# Mengambil daftar user unik dari 500 log terakhir
+users=($(tail -n 500 /var/log/xray/access.log | grep "email:" | awk -F'email: ' '{print $2}' | sort -u))
+
+# Fungsi untuk mendapatkan informasi IP dari ipinfo.io
+get_ip_info() {
+    local ip=$1
+
+    # Jika tidak ada API token, langsung return "-"
+    if [[ "$USE_IPINFO" == false ]]; then
+        echo "-"
+        return
+    fi
+
+    local response=$(curl -s "https://ipinfo.io/$ip?token=$API_TOKEN")
+
+    if [[ -z "$response" ]]; then
+        echo "Unknown | Unknown"
+        return
+    fi
+
+    local city=$(echo "$response" | jq -r '.city // "Unknown"')
+    local isp=$(echo "$response" | jq -r '.org // "Unknown"')
+
+    echo "$city | $isp"
+}
+
+# Proses untuk tiap user
+for user in "${users[@]}"; do
+    [[ -z "$user" ]] && continue
+
+    # Mengambil semua IP (IPv4 & IPv6) yang digunakan user dalam 500 log terakhir
+    ip_list=($(tail -n 500 /var/log/xray/access.log | grep "email: $user" | \
+                grep -oP '(?<=from )((([0-9]{1,3}\.){3}[0-9]{1,3})|(\[[0-9a-fA-F:]+\]))' | \
+                sed 's/\[\(.*\)\]/\1/' | sort -u))
+
+    echo "From $user"
+
+    # Menampilkan IP atau pesan jika tidak ada
+    if [[ ${#ip_list[@]} -eq 0 ]]; then
+        echo "   (Tidak ada IP terdeteksi)"
+    else
+        i=1
+        for ip in "${ip_list[@]}"; do
+            ip_info=$(get_ip_info "$ip")
+            if [[ "$USE_IPINFO" == false ]]; then
+                echo "   $i. $ip"
+            else
+                echo "   $i. $ip | $ip_info"
+            fi
+            ((i++))
+        done
+    fi
+
+    echo -e "\033[1;93m─────────────────────────────────────────\033[0m"
+done
+
+read -n 1 -s -r -p "Press any key to back on menu"
+menu

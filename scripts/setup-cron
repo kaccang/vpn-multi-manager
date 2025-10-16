@@ -1,0 +1,97 @@
+#!/bin/bash
+
+##############################################
+# Setup Cron Jobs for VPN Multi-Profile System
+# All cron jobs run on HOST, not in containers
+##############################################
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+BASE_DIR="/opt/vpn-multi"
+
+# Check root
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}Error: Must run as root!${NC}"
+    exit 1
+fi
+
+echo -e "${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║        SETUP CRON JOBS FOR VPN SYSTEM                ║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+echo -e "${YELLOW}This will setup the following cron jobs:${NC}"
+echo "  1. Bandwidth check (hourly)"
+echo "  2. Health check (every 5 minutes)"
+echo "  3. SSL queue processor (every 3 minutes)"
+echo "  4. Auto backup (daily at 2 AM)"
+echo ""
+
+read -p "Continue? [Y/N]: " confirm
+if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "Cancelled"
+    exit 0
+fi
+
+# Create logs directory
+mkdir -p "$BASE_DIR/logs"
+
+# Create temporary cron file from existing crontab
+crontab -l 2>/dev/null > /tmp/vpn-cron || touch /tmp/vpn-cron
+
+# Remove old VPN-related entries
+sed -i '/vpn-multi/d' /tmp/vpn-cron
+sed -i '/bandwidth-check/d' /tmp/vpn-cron
+sed -i '/health-check /d' /tmp/vpn-cron
+sed -i '/ssl-auto-install/d' /tmp/vpn-cron
+sed -i '/backup-system/d' /tmp/vpn-cron
+
+# Add new entries with logging
+cat >> /tmp/vpn-cron <<'EOF'
+
+# VPN Multi-Profile System - Automated Tasks
+
+# Bandwidth check - every hour
+0 * * * * /opt/vpn-multi/scripts/bandwidth-check >> /opt/vpn-multi/logs/bandwidth.log 2>&1
+
+# Health check - every 5 minutes
+*/5 * * * * /opt/vpn-multi/scripts/health-check >> /opt/vpn-multi/logs/health.log 2>&1
+
+# SSL queue processor - every 3 minutes
+*/3 * * * * /opt/vpn-multi/scripts/ssl-auto-install --queue >> /opt/vpn-multi/logs/ssl-queue.log 2>&1
+
+# Auto backup - daily at 2 AM
+0 2 * * * /opt/vpn-multi/scripts/backup-system all >> /opt/vpn-multi/logs/backup.log 2>&1
+
+EOF
+
+# Install new crontab
+if crontab /tmp/vpn-cron; then
+    echo -e "${GREEN}✓ Cron jobs installed successfully!${NC}"
+    rm /tmp/vpn-cron
+
+    echo ""
+    echo -e "${CYAN}Active cron jobs:${NC}"
+    echo ""
+    crontab -l | grep -A 10 "VPN Multi-Profile"
+
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}Setup completed!${NC}"
+    echo ""
+    echo -e "${YELLOW}Monitor logs:${NC}"
+    echo "  tail -f $BASE_DIR/logs/bandwidth.log"
+    echo "  tail -f $BASE_DIR/logs/health.log"
+    echo "  tail -f $BASE_DIR/logs/ssl-queue.log"
+    echo "  tail -f $BASE_DIR/logs/backup.log"
+    echo ""
+else
+    echo -e "${RED}✗ Failed to install cron jobs!${NC}"
+    rm /tmp/vpn-cron
+    exit 1
+fi

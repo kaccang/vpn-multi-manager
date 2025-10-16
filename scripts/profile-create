@@ -1,0 +1,386 @@
+#!/bin/bash
+
+##############################################
+# VPN Multi-Profile System
+# Profile Creation Script with CLI Semi-GUI
+# Features: Password, Expiry, Bandwidth Limit
+##############################################
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Base directory
+BASE_DIR="/opt/vpn-multi"
+PROFILES_DIR="$BASE_DIR/profiles"
+DOCKER_BASE="$BASE_DIR/docker-base"
+HISTORY_FILE="$BASE_DIR/history.md"
+
+# Check root
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}Error: Must run as root!${NC}"
+    exit 1
+fi
+
+# Function: Generate random password
+generate_password() {
+    local length=$1
+    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c $length
+}
+
+# Function: Check port available
+check_port_available() {
+    ! ss -tuln | grep -q ":$1 "
+}
+
+# Function: Get next available SSH port (2200-2333)
+get_next_ssh_port() {
+    for port in {2200..2333}; do
+        if check_port_available $port; then
+            echo $port
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Function: Validate domain
+validate_domain() {
+    [[ $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.[a-zA-Z]{2,}$ ]]
+}
+
+# Function: Validate password
+validate_password() {
+    local pw="$1"
+    local len=${#pw}
+    [ $len -ge 8 ] && [ $len -le 25 ]
+}
+
+clear
+echo -e "${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║          CREATE NEW VPN PROFILE                      ║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+# 1. Profile Name
+while true; do
+    read -p "Profile Name      : " profile_name
+    [ -z "$profile_name" ] && { echo -e "${RED}Cannot be empty!${NC}"; continue; }
+    [[ ! "$profile_name" =~ ^[a-zA-Z0-9_-]+$ ]] && { echo -e "${RED}Only alphanumeric, - and _${NC}"; continue; }
+    [ -d "$PROFILES_DIR/$profile_name" ] && { echo -e "${RED}Already exists!${NC}"; continue; }
+    break
+done
+
+# 2. Domain
+while true; do
+    read -p "Domain            : " domain
+    [ -z "$domain" ] && { echo -e "${RED}Cannot be empty!${NC}"; continue; }
+    validate_domain "$domain" || { echo -e "${RED}Invalid format!${NC}"; continue; }
+    break
+done
+
+# 3. CPU (%)
+while true; do
+    read -p "CPU (%)           : " cpu_percent
+    [[ "$cpu_percent" =~ ^[0-9]+$ ]] && [ "$cpu_percent" -ge 25 ] && [ "$cpu_percent" -le 400 ] && break
+    echo -e "${RED}Must be 25-400!${NC}"
+done
+
+# 4. RAM (MB)
+while true; do
+    read -p "RAM (MB)          : " ram_mb
+    [[ "$ram_mb" =~ ^[0-9]+$ ]] && [ "$ram_mb" -ge 128 ] && [ "$ram_mb" -le 8192 ] && break
+    echo -e "${RED}Must be 128-8192!${NC}"
+done
+
+# 5. SSH Port
+suggested_port=$(get_next_ssh_port)
+[ -z "$suggested_port" ] && { echo -e "${RED}No available ports (2200-2333)!${NC}"; exit 1; }
+
+while true; do
+    read -p "Port SSH          [${GREEN}$suggested_port${NC}]: " ssh_port
+    [ -z "$ssh_port" ] && ssh_port=$suggested_port
+    [[ "$ssh_port" =~ ^[0-9]+$ ]] && [ "$ssh_port" -ge 2200 ] && [ "$ssh_port" -le 2333 ] && check_port_available "$ssh_port" && break
+    echo -e "${RED}Invalid or in use! Range: 2200-2333${NC}"
+done
+
+# 6. Expired (days)
+while true; do
+    read -p "Expired (days)    : " expired_days
+    [[ "$expired_days" =~ ^[0-9]+$ ]] && [ "$expired_days" -ge 1 ] && break
+    echo -e "${RED}Must be >= 1!${NC}"
+done
+
+expired_date=$(date -d "+${expired_days} days" +"%Y-%m-%d")
+
+# 7. SSH Password
+echo -n "SSH Password      [Enter for auto]: "
+read -s ssh_password
+echo ""
+
+if [ -z "$ssh_password" ]; then
+    # Auto-generate: 8-12 chars
+    ssh_password=$(generate_password $((8 + RANDOM % 5)))
+    echo -e "                  ${GREEN}Auto-generated: $ssh_password${NC}"
+else
+    # Validate custom password
+    if ! validate_password "$ssh_password"; then
+        echo -e "${RED}Password must be 8-25 characters!${NC}"
+        exit 1
+    fi
+    echo -e "                  ${GREEN}Custom: $ssh_password${NC}"
+fi
+
+# 8. Bandwidth Limit (TB)
+while true; do
+    read -p "Bandwidth (TB/mo) : " bandwidth_tb
+    [[ "$bandwidth_tb" =~ ^[0-9]+$ ]] && [ "$bandwidth_tb" -ge 1 ] && break
+    echo -e "${RED}Must be >= 1 TB!${NC}"
+done
+
+# 9. Restore Link (optional)
+read -p "Restore Link      [optional]: " restore_link
+
+# Confirmation
+echo ""
+echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}Profile yang akan dibuat:${NC}"
+echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
+echo -e "Nama          : ${YELLOW}$profile_name${NC}"
+echo -e "Domain        : ${YELLOW}$domain${NC}"
+echo -e "CPU           : ${YELLOW}${cpu_percent}%${NC}"
+echo -e "RAM           : ${YELLOW}${ram_mb}MB${NC}"
+echo -e "Port SSH      : ${YELLOW}$ssh_port${NC}"
+echo -e "Expired       : ${YELLOW}$expired_date ($expired_days days)${NC}"
+echo -e "SSH Password  : ${YELLOW}$ssh_password${NC}"
+echo -e "Bandwidth     : ${YELLOW}${bandwidth_tb}TB/month${NC}"
+[ -n "$restore_link" ] && echo -e "Restore       : ${YELLOW}$restore_link${NC}" || echo -e "Restore       : ${YELLOW}(Fresh install)${NC}"
+echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
+echo ""
+
+while true; do
+    read -p "Apakah yakin create profile baru? [Y/N]: " confirm
+    case $confirm in
+        [Yy]*) break;;
+        [Nn]*) echo -e "${RED}Cancelled.${NC}"; exit 0;;
+        *) echo -e "${RED}Y or N only!${NC}";;
+    esac
+done
+
+# Create profile
+echo ""
+echo -e "${CYAN}Creating profile...${NC}"
+
+mkdir -p "$PROFILES_DIR/$profile_name/logs"
+
+# Save metadata
+cat > "$PROFILES_DIR/$profile_name/profile.conf" <<EOF
+PROFILE_NAME="$profile_name"
+DOMAIN="$domain"
+CPU_PERCENT="$cpu_percent"
+RAM_MB="$ram_mb"
+SSH_PORT="$ssh_port"
+SSH_PASSWORD="$ssh_password"
+EXPIRED_DATE="$expired_date"
+BANDWIDTH_TB="$bandwidth_tb"
+BANDWIDTH_USED_GB="0"
+BANDWIDTH_RESET_DATE="$(date -d 'next month' +%Y-%m-01)"
+CREATED_AT="$(date +"%Y-%m-%d %H:%M:%S")"
+EOF
+
+# Restore from backup
+if [ -n "$restore_link" ]; then
+    echo -e "${YELLOW}[1/8] Downloading backup...${NC}"
+    wget -q --show-progress -O /tmp/backup.tar.gz "$restore_link" && \
+    tar -xzf /tmp/backup.tar.gz -C "$PROFILES_DIR/$profile_name/" 2>/dev/null && \
+    echo -e "${GREEN}Restored!${NC}" || echo -e "${RED}Failed, continuing fresh...${NC}"
+    rm -f /tmp/backup.tar.gz
+else
+    echo -e "${YELLOW}[1/8] Fresh install...${NC}"
+fi
+
+# Xray config
+echo -e "${YELLOW}[2/8] Creating Xray config...${NC}"
+cat > "$PROFILES_DIR/$profile_name/config.json" <<'XRAYEOF'
+{
+  "log": {"loglevel": "warning"},
+  "inbounds": [
+    {"listen": "0.0.0.0", "port": 10001, "protocol": "vless",
+     "settings": {"decryption": "none", "clients": [{"id": "placeholder-uuid"
+#vless
+     }]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/vless"}}},
+    {"listen": "0.0.0.0", "port": 10002, "protocol": "vmess",
+     "settings": {"clients": [{"id": "placeholder-uuid", "alterId": 0
+#vmess
+     }]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/vmess"}}},
+    {"listen": "0.0.0.0", "port": 10003, "protocol": "trojan",
+     "settings": {"clients": [{"password": "placeholder-password"
+#trojanws
+     }]}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/trojan-ws"}}}
+  ],
+  "outbounds": [{"protocol": "freedom", "tag": "direct"}]
+}
+XRAYEOF
+
+echo "$domain" > "$PROFILES_DIR/$profile_name/domain.txt"
+
+# Docker Compose
+echo -e "${YELLOW}[3/8] Creating Docker config...${NC}"
+container_name="vpn-${profile_name}"
+network_name="vpn-net-${profile_name}"
+cat > "$PROFILES_DIR/$profile_name/docker-compose.yml" <<DOCKEREOF
+version: '3.8'
+services:
+  $container_name:
+    build: $DOCKER_BASE
+    container_name: $container_name
+    hostname: $profile_name
+    restart: unless-stopped
+    ports:
+      - "$ssh_port:22"
+    volumes:
+      - $PROFILES_DIR/$profile_name/config.json:/etc/xray/config.json
+      - $PROFILES_DIR/$profile_name/domain.txt:/etc/xray/domain
+      - $PROFILES_DIR/$profile_name/profile.conf:/etc/xray/profile.conf
+      - $PROFILES_DIR/$profile_name/logs:/var/log/xray
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -x sshd && pgrep -x xray || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '$(awk "BEGIN {print $cpu_percent/100}")'
+          memory: ${ram_mb}M
+    networks:
+      - $network_name
+networks:
+  $network_name:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.$((RANDOM % 250 + 1)).0/24
+DOCKEREOF
+
+# Build & start
+echo -e "${YELLOW}[4/8] Building Docker image...${NC}"
+cd "$PROFILES_DIR/$profile_name"
+if ! docker-compose build; then
+    echo -e "${RED}✗ Failed to build Docker image!${NC}"
+    rm -rf "$PROFILES_DIR/$profile_name"
+    exit 1
+fi
+
+echo -e "${YELLOW}[5/8] Starting container...${NC}"
+if ! docker-compose up -d; then
+    echo -e "${RED}✗ Failed to start container!${NC}"
+    docker-compose down 2>/dev/null
+    rm -rf "$PROFILES_DIR/$profile_name"
+    exit 1
+fi
+
+# Wait for container to be healthy
+echo -e "${YELLOW}[5.5/8] Waiting for container to be ready...${NC}"
+for i in {1..30}; do
+    if docker ps | grep -q "$container_name"; then
+        sleep 2
+        if docker exec $container_name pgrep -x sshd > /dev/null 2>&1; then
+            echo -e "${GREEN}✓ Container is ready!${NC}"
+            break
+        fi
+    fi
+    [ $i -eq 30 ] && {
+        echo -e "${RED}✗ Container failed to start properly!${NC}"
+        docker-compose down
+        rm -rf "$PROFILES_DIR/$profile_name"
+        exit 1
+    }
+    sleep 1
+done
+
+# Setup SSH password
+echo -e "${YELLOW}[6/8] Setting up SSH password...${NC}"
+docker exec $container_name bash -c "echo 'root:$ssh_password' | chpasswd"
+
+# Setup SSH key for passwordless access (admin only)
+echo -e "${YELLOW}[7/8] Setting up passwordless SSH for admin...${NC}"
+if [ ! -f ~/.ssh/id_rsa ]; then
+    ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa -q
+fi
+docker exec $container_name mkdir -p /root/.ssh
+docker cp ~/.ssh/id_rsa.pub $container_name:/tmp/admin_key.pub
+docker exec $container_name bash -c "cat /tmp/admin_key.pub >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+
+# Update Nginx reverse proxy
+echo -e "${YELLOW}[8/8] Updating Nginx reverse proxy...${NC}"
+if [ -f /opt/vpn-multi/scripts/nginx-update-sni ]; then
+    if ! /opt/vpn-multi/scripts/nginx-update-sni; then
+        echo -e "${YELLOW}⚠ Warning: Nginx update failed, but profile created successfully${NC}"
+        echo -e "${YELLOW}  Run manually: nginx-update-sni${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ nginx-update-sni script not found, skipping...${NC}"
+fi
+
+# Success
+clear
+echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║        PROFILE CREATED SUCCESSFULLY!                 ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${CYAN}Profile Information:${NC}"
+echo -e "  Name          : ${YELLOW}$profile_name${NC}"
+echo -e "  Domain        : ${YELLOW}$domain${NC}"
+echo -e "  CPU           : ${YELLOW}${cpu_percent}%${NC}"
+echo -e "  RAM           : ${YELLOW}${ram_mb}MB${NC}"
+echo -e "  SSH Port      : ${YELLOW}$ssh_port${NC}"
+echo -e "  Expired       : ${YELLOW}$expired_date ($expired_days days)${NC}"
+echo -e "  Bandwidth     : ${YELLOW}${bandwidth_tb}TB/month${NC}"
+echo ""
+echo -e "${CYAN}Access Information:${NC}"
+echo -e "  SSH Command   : ${YELLOW}ssh root@$(hostname -I | awk '{print $1}') -p $ssh_port${NC}"
+echo -e "  SSH Password  : ${YELLOW}$ssh_password${NC}"
+echo ""
+echo -e "  ${GREEN}Admin Shortcut: ${YELLOW}profile-ssh $profile_name${NC} ${GREEN}(passwordless)${NC}"
+echo ""
+echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
+echo ""
+echo -e "${RED}⚠️  IMPORTANT: Send password to client via secure channel!${NC}"
+echo ""
+
+# Log to history
+cat >> "$HISTORY_FILE" << EOF
+
+## $(date +"%Y-%m-%d %H:%M:%S")
+
+**User Request:**
+> Create profile '$profile_name'
+
+**Action:**
+- Profile: $profile_name
+- Domain: $domain
+- CPU: ${cpu_percent}%, RAM: ${ram_mb}MB
+- SSH Port: $ssh_port, Password: $ssh_password
+- Expired: $expired_date ($expired_days days)
+- Bandwidth: ${bandwidth_tb}TB/month
+
+**AI Response:**
+Profile '$profile_name' created successfully!
+
+**Status:** ✅ Success
+
+---
+EOF
+
+echo -e "${YELLOW}Done!${NC}"

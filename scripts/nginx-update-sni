@@ -1,0 +1,108 @@
+#!/bin/bash
+
+##############################################
+# Nginx SNI Update - Reverse Proxy Config
+##############################################
+
+BASE_DIR="/opt/vpn-multi"
+PROFILES_DIR="$BASE_DIR/profiles"
+NGINX_CONFIG="/etc/nginx/sites-available/vpn-multi"
+NGINX_LINK="/etc/nginx/sites-enabled/vpn-multi"
+
+# Create Nginx config
+cat > "$NGINX_CONFIG" <<'NGINXEOF'
+# VPN Multi-Profile Reverse Proxy
+# Auto-generated - DO NOT EDIT MANUALLY
+
+# Default server (fallback)
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+
+    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
+    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
+
+    server_name _;
+    return 404;
+}
+
+NGINXEOF
+
+# Loop through all profiles and add server blocks
+for profile_dir in $PROFILES_DIR/*/; do
+    if [ ! -d "$profile_dir" ]; then
+        continue
+    fi
+
+    profile_name=$(basename "$profile_dir")
+
+    # Load profile config
+    if [ ! -f "$profile_dir/profile.conf" ]; then
+        continue
+    fi
+
+    source "$profile_dir/profile.conf"
+
+    # Get container IP
+    container_name="vpn-${PROFILE_NAME}"
+    container_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $container_name 2>/dev/null)
+
+    if [ -z "$container_ip" ]; then
+        continue
+    fi
+
+    # Add server block for this profile
+    cat >> "$NGINX_CONFIG" <<SERVEREOF
+
+# Profile: $PROFILE_NAME
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $DOMAIN;
+
+    location / {
+        proxy_pass http://${container_ip}:80;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name $DOMAIN;
+
+    ssl_certificate /opt/vpn-multi/profiles/$PROFILE_NAME/ssl/fullchain.pem;
+    ssl_certificate_key /opt/vpn-multi/profiles/$PROFILE_NAME/ssl/privkey.pem;
+
+    location / {
+        proxy_pass http://${container_ip}:443;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    }
+}
+
+SERVEREOF
+done
+
+# Enable site
+ln -sf "$NGINX_CONFIG" "$NGINX_LINK" 2>/dev/null
+
+# Test and reload Nginx
+if nginx -t 2>/dev/null; then
+    nginx -s reload 2>/dev/null || systemctl reload nginx
+    echo "✓ Nginx configuration updated"
+else
+    echo "✗ Nginx configuration error"
+    exit 1
+fi

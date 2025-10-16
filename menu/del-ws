@@ -1,0 +1,58 @@
+#!/bin/bash
+clear
+
+# Ambil list user unik dari config.json
+CLIENT_LIST=$(grep -E "^### " "/etc/xray/config.json" | cut -d ' ' -f 2 | sort -u)
+NUMBER_OF_CLIENTS=$(echo "$CLIENT_LIST" | wc -l)
+
+# Jika tidak ada user
+if [[ ${NUMBER_OF_CLIENTS} == '0' ]]; then
+    echo "─────────────────────────────────────────"
+    echo "             Delete VPN Account"
+    echo "─────────────────────────────────────────"
+    echo ""
+    echo "You have no existing clients!"
+    echo ""
+    echo "─────────────────────────────────────────"
+    read -n 1 -s -r -p "Press any key to back on menu"
+    menu
+fi
+
+# Tampilkan menu
+clear
+echo "─────────────────────────────────────────"
+echo "             Delete VPN Account"
+echo "─────────────────────────────────────────"
+echo "     NO    Username"
+echo "─────────────────────────────────────────"
+
+# Tampilkan user dengan nomor
+echo "$CLIENT_LIST" | nl -s ') '
+
+# Input user pilihan
+until [[ ${CLIENT_NUMBER} -ge 1 && ${CLIENT_NUMBER} -le ${NUMBER_OF_CLIENTS} ]]; do
+    read -rp "Select one client [1-${NUMBER_OF_CLIENTS}]: " CLIENT_NUMBER
+done
+
+# Ambil username sesuai pilihan
+user=$(echo "$CLIENT_LIST" | sed -n "${CLIENT_NUMBER}p")
+
+# Ambil expired pertama dari user tsb
+exp=$(grep -E "^### $user " "/etc/xray/config.json" | head -n1 | cut -d ' ' -f 3)
+
+# Hapus entri JSON berdasarkan user dan expired
+sed -i "/^### $user $exp/,/^},{/d" /etc/xray/config.json
+
+# Restart service
+systemctl restart xray
+
+# Output hasil
+clear
+echo "─────────────────────────────────────────"
+echo " VPN Account Deleted Successfully"
+echo "─────────────────────────────────────────"
+echo " Client Name : $user"
+echo " Expired On  : $exp"
+echo "─────────────────────────────────────────"
+read -n 1 -s -r -p "Press any key to back on menu"
+menu

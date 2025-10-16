@@ -1,0 +1,63 @@
+#!/bin/bash
+
+clear
+CONFIG="/etc/xray/config.json"
+
+echo -e "\033[1;36m╔══════════════════════════════════════════╗\033[0m"
+echo -e "\033[1;36m║         DELETE TROJAN ACCOUNT            ║\033[0m"
+echo -e "\033[1;36m╚══════════════════════════════════════════╝\033[0m"
+echo ""
+
+mapfile -t entries < <(grep -E '^#!' "$CONFIG" | awk '!seen[$2]++')
+
+if [ ${#entries[@]} -eq 0 ]; then
+    echo "No Trojan accounts found."
+    read -n 1 -s -r -p "Press any key to return to menu..."
+    /root/scripts/menu
+    exit 0
+fi
+
+echo "Existing Trojan Accounts:"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+for i in "${!entries[@]}"; do
+    user=$(echo "${entries[$i]}" | awk '{print $2}')
+    exp=$(echo "${entries[$i]}" | awk '{print $3}')
+    printf "  %2d. %-20s (Exp: %s)\n" $((i+1)) "$user" "$exp"
+done
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+read -p "Select account number to delete [1-${#entries[@]}]: " num
+
+if [ "$num" -lt 1 ] || [ "$num" -gt ${#entries[@]} ]; then
+    echo "Invalid selection!"
+    sleep 2
+    /root/scripts/menu
+    exit 1
+fi
+
+line="${entries[$((num-1))]}"
+user=$(echo "$line" | awk '{print $2}')
+
+echo ""
+read -p "Delete user '$user'? [Y/N]: " confirm
+
+if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "Cancelled."
+    sleep 1
+    /root/scripts/menu
+    exit 0
+fi
+
+sed -i "/^#! $user /,/^},{/d" "$CONFIG"
+
+echo ""
+echo -e "\033[1;32m✓ User '$user' deleted successfully!\033[0m"
+
+pkill -9 xray 2>/dev/null
+sleep 1
+/usr/local/bin/xray run -config /etc/xray/config.json &
+
+echo ""
+read -n 1 -s -r -p "Press any key to return to menu..."
+/root/scripts/menu

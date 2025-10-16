@@ -1,0 +1,225 @@
+#!/bin/bash
+
+##############################################
+# VPN Multi-Profile System
+# Profile Renew/Extend Expiry
+##############################################
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+BASE_DIR="/opt/vpn-multi"
+PROFILES_DIR="$BASE_DIR/profiles"
+HISTORY_FILE="$BASE_DIR/history.md"
+
+# Check root
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}Error: This script must be run as root!${NC}"
+    exit 1
+fi
+
+clear
+echo -e "${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║                                                      ║${NC}"
+echo -e "${CYAN}║        RENEW/EXTEND PROFILE EXPIRY                   ║${NC}"
+echo -e "${CYAN}║                                                      ║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+# List available profiles
+echo -e "${YELLOW}Available Profiles:${NC}"
+echo ""
+counter=1
+declare -A profiles
+for profile_dir in $PROFILES_DIR/*/; do
+    if [ -d "$profile_dir" ]; then
+        profile_name=$(basename "$profile_dir")
+        profiles[$counter]=$profile_name
+
+        # Load profile info
+        if [ -f "$profile_dir/profile.conf" ]; then
+            source "$profile_dir/profile.conf"
+
+            # Calculate days remaining
+            NOW=$(date +%s)
+            EXPIRED_DATE_EPOCH=$(date -d "$EXPIRED_DATE" +%s 2>/dev/null || echo "0")
+            DAYS_REMAINING=$(( ($EXPIRED_DATE_EPOCH - $NOW) / 86400 ))
+
+            if [ "$DAYS_REMAINING" -lt 0 ]; then
+                status="${RED}EXPIRED ($((-$DAYS_REMAINING)) days overdue)${NC}"
+            elif [ "$DAYS_REMAINING" -le 5 ]; then
+                status="${YELLOW}$DAYS_REMAINING days remaining${NC}"
+            else
+                status="${GREEN}$DAYS_REMAINING days remaining${NC}"
+            fi
+
+            printf "  %2d. %-20s %-30s %s\n" "$counter" "$profile_name" "$DOMAIN" "$EXPIRED_DATE ($status)"
+        else
+            printf "  %2d. %-20s %-30s %s\n" "$counter" "$profile_name" "Unknown" "No config"
+        fi
+
+        ((counter++))
+    fi
+done
+
+if [ $counter -eq 1 ]; then
+    echo -e "${RED}No profiles found!${NC}"
+    exit 1
+fi
+
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+# Select profile
+while true; do
+    read -p "$(echo -e ${YELLOW}Select profile number \[1-$((counter-1))\]:${NC}) " profile_num
+
+    if [[ "$profile_num" =~ ^[0-9]+$ ]] && [ "$profile_num" -ge 1 ] && [ "$profile_num" -lt "$counter" ]; then
+        selected_profile="${profiles[$profile_num]}"
+        break
+    else
+        echo -e "${RED}Invalid selection!${NC}"
+    fi
+done
+
+profile_dir="$PROFILES_DIR/$selected_profile"
+
+# Load profile config
+if [ ! -f "$profile_dir/profile.conf" ]; then
+    echo -e "${RED}Error: Profile configuration not found!${NC}"
+    exit 1
+fi
+
+source "$profile_dir/profile.conf"
+
+# Calculate current days remaining
+NOW=$(date +%s)
+EXPIRED_DATE_EPOCH=$(date -d "$EXPIRED_DATE" +%s 2>/dev/null || echo "0")
+DAYS_REMAINING=$(( ($EXPIRED_DATE_EPOCH - $NOW) / 86400 ))
+
+echo ""
+echo -e "${CYAN}Selected Profile:${NC}"
+echo -e "  Name          : ${YELLOW}$PROFILE_NAME${NC}"
+echo -e "  Domain        : ${YELLOW}$DOMAIN${NC}"
+echo -e "  Current Expiry: ${YELLOW}$EXPIRED_DATE${NC}"
+
+if [ "$DAYS_REMAINING" -lt 0 ]; then
+    echo -e "  Status        : ${RED}EXPIRED ($((-$DAYS_REMAINING)) days overdue)${NC}"
+else
+    echo -e "  Status        : ${GREEN}Active ($DAYS_REMAINING days remaining)${NC}"
+fi
+
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+# Input extend days
+while true; do
+    read -p "$(echo -e ${YELLOW}Extend for how many days?${NC}) " extend_days
+
+    if [[ "$extend_days" =~ ^[0-9]+$ ]] && [ "$extend_days" -ge 1 ]; then
+        break
+    else
+        echo -e "${RED}Please enter a valid number of days (minimum 1)${NC}"
+    fi
+done
+
+# Calculate new expiry date
+if [ "$DAYS_REMAINING" -lt 0 ]; then
+    # If already expired, extend from today
+    new_expired_date=$(date -d "+${extend_days} days" +"%Y-%m-%d")
+    extend_from="today (profile was expired)"
+else
+    # If still active, extend from current expiry date
+    new_expired_date=$(date -d "$EXPIRED_DATE +${extend_days} days" +"%Y-%m-%d")
+    extend_from="current expiry date"
+fi
+
+new_expired_epoch=$(date -d "$new_expired_date" +%s)
+new_days_remaining=$(( ($new_expired_epoch - $NOW) / 86400 ))
+
+echo ""
+echo -e "${CYAN}Renewal Summary:${NC}"
+echo -e "  Profile       : ${YELLOW}$PROFILE_NAME${NC}"
+echo -e "  Old Expiry    : ${YELLOW}$EXPIRED_DATE${NC}"
+echo -e "  Extend By     : ${YELLOW}$extend_days days${NC} (from $extend_from)"
+echo -e "  New Expiry    : ${GREEN}$new_expired_date${NC}"
+echo -e "  Total Active  : ${GREEN}$new_days_remaining days${NC} from today"
+echo ""
+
+# Confirmation
+while true; do
+    read -p "$(echo -e ${GREEN}Confirm renewal? \[Y/N\]${NC}): " confirm
+    case $confirm in
+        [Yy]* ) break;;
+        [Nn]* ) echo -e "${RED}Renewal cancelled.${NC}"; exit 0;;
+        * ) echo -e "${RED}Please answer Y or N.${NC}";;
+    esac
+done
+
+# Update profile.conf
+sed -i "s/EXPIRED_DATE=\".*\"/EXPIRED_DATE=\"$new_expired_date\"/" "$profile_dir/profile.conf"
+
+# Update container's profile.conf
+container_name="vpn-${PROFILE_NAME}"
+if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+    docker exec $container_name bash -c "sed -i 's/EXPIRED_DATE=\".*\"/EXPIRED_DATE=\"$new_expired_date\"/' /etc/xray/profile.conf"
+
+    # If was expired, restart Xray
+    if [ "$DAYS_REMAINING" -lt 0 ]; then
+        echo -e "${YELLOW}Profile was expired. Restarting Xray service...${NC}"
+        docker exec $container_name bash -c "pkill -9 xray 2>/dev/null; /usr/local/bin/xray run -config /etc/xray/config.json &"
+        echo -e "${GREEN}Xray service restarted!${NC}"
+    fi
+fi
+
+# Success
+clear
+echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║                                                      ║${NC}"
+echo -e "${GREEN}║        PROFILE RENEWED SUCCESSFULLY!                 ║${NC}"
+echo -e "${GREEN}║                                                      ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${CYAN}Renewal Details:${NC}"
+echo -e "  Profile       : ${YELLOW}$PROFILE_NAME${NC}"
+echo -e "  Domain        : ${YELLOW}$DOMAIN${NC}"
+echo -e "  Old Expiry    : ${YELLOW}$EXPIRED_DATE${NC}"
+echo -e "  New Expiry    : ${GREEN}$new_expired_date${NC}"
+echo -e "  Extended By   : ${GREEN}$extend_days days${NC}"
+echo -e "  Status        : ${GREEN}✅ Active ($new_days_remaining days remaining)${NC}"
+echo ""
+echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
+
+# Log to history
+cat >> "$HISTORY_FILE" << EOF
+
+## $(date +"%Y-%m-%d %H:%M:%S")
+
+**User Request:**
+> Renew profile '$PROFILE_NAME' for $extend_days days
+
+**Action:**
+- Extended profile expiry from $EXPIRED_DATE to $new_expired_date
+- Updated profile.conf in host and container
+$([ "$DAYS_REMAINING" -lt 0 ] && echo "- Restarted Xray service (profile was expired)")
+
+**AI Response:**
+Profile '$PROFILE_NAME' berhasil diperpanjang:
+- Old Expiry: $EXPIRED_DATE
+- New Expiry: $new_expired_date
+- Extended: $extend_days days
+- Status: ✅ Active ($new_days_remaining days remaining)
+
+**Status:** ✅ Success
+
+---
+EOF
+
+echo ""
+echo -e "${YELLOW}Profile renewal completed!${NC}"

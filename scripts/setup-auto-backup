@@ -1,0 +1,68 @@
+#!/bin/bash
+
+##############################################
+# Setup Auto Backup Cron Job
+##############################################
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+BASE_DIR="/opt/vpn-multi"
+ENV_FILE="$BASE_DIR/.env"
+
+# Load config
+if [ ! -f "$ENV_FILE" ]; then
+    echo -e "${RED}Error: .env not found! Copy .env.example first.${NC}"
+    exit 1
+fi
+
+source "$ENV_FILE"
+
+clear
+echo -e "${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║          SETUP AUTO BACKUP                           ║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+if [ "$BACKUP_AUTO_ENABLED" != "true" ]; then
+    echo -e "${YELLOW}Auto backup is disabled in .env${NC}"
+    echo "Set BACKUP_AUTO_ENABLED=true to enable."
+    exit 0
+fi
+
+echo -e "${GREEN}Configuration:${NC}"
+echo "  Time         : $BACKUP_AUTO_TIME daily"
+echo "  All Profiles : $BACKUP_AUTO_PROFILES"
+echo "  Global       : $BACKUP_AUTO_GLOBAL"
+echo ""
+
+# Convert time to cron format
+IFS=':' read -r hour minute <<< "$BACKUP_AUTO_TIME"
+cron_schedule="$minute $hour * * *"
+
+# Remove old backup cron jobs
+crontab -l 2>/dev/null | grep -v "backup-system" | crontab - 2>/dev/null
+
+# Add new cron jobs
+if [ "$BACKUP_AUTO_PROFILES" == "true" ]; then
+    (crontab -l 2>/dev/null; echo "$cron_schedule $BASE_DIR/scripts/backup-system all >> $BASE_DIR/logs/backup.log 2>&1") | crontab -
+    echo -e "${GREEN}✓ Auto backup all profiles enabled${NC}"
+fi
+
+if [ "$BACKUP_AUTO_GLOBAL" == "true" ]; then
+    # Global backup weekly (Sunday at 3 AM)
+    (crontab -l 2>/dev/null; echo "0 3 * * 0 $BASE_DIR/scripts/backup-system global >> $BASE_DIR/logs/backup.log 2>&1") | crontab -
+    echo -e "${GREEN}✓ Auto backup global (weekly) enabled${NC}"
+fi
+
+echo ""
+echo -e "${CYAN}Cron jobs configured!${NC}"
+echo ""
+echo "View cron jobs:"
+echo "  crontab -l"
+echo ""
+echo "View backup logs:"
+echo "  tail -f $BASE_DIR/logs/backup.log"

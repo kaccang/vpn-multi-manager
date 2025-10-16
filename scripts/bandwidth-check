@@ -1,0 +1,83 @@
+#!/bin/bash
+
+##############################################
+# Bandwidth Monitor - Check Usage & Enforce Limits
+##############################################
+
+BASE_DIR="/opt/vpn-multi"
+PROFILES_DIR="$BASE_DIR/profiles"
+LOG_FILE="$BASE_DIR/logs/bandwidth.log"
+
+echo "$(date): Starting bandwidth check..." >> "$LOG_FILE"
+
+# Loop through all profiles
+for profile_dir in $PROFILES_DIR/*/; do
+    if [ ! -d "$profile_dir" ]; then
+        continue
+    fi
+
+    profile_name=$(basename "$profile_dir")
+
+    # Load profile config
+    if [ ! -f "$profile_dir/profile.conf" ]; then
+        continue
+    fi
+
+    source "$profile_dir/profile.conf"
+
+    container_name="vpn-${PROFILE_NAME}"
+
+    # Check if container is running
+    if ! docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+        continue
+    fi
+
+    # Get current month/year
+    current_month=$(date +%Y-%m-01)
+
+    # Reset bandwidth if new month
+    if [ "$BANDWIDTH_RESET_DATE" != "$current_month" ]; then
+        echo "$(date): Resetting bandwidth for $PROFILE_NAME (new month)" >> "$LOG_FILE"
+        sed -i "s/BANDWIDTH_USED_GB=\".*\"/BANDWIDTH_USED_GB=\"0\"/" "$profile_dir/profile.conf"
+        sed -i "s/BANDWIDTH_RESET_DATE=\".*\"/BANDWIDTH_RESET_DATE=\"$current_month\"/" "$profile_dir/profile.conf"
+        BANDWIDTH_USED_GB=0
+    fi
+
+    # Get current bandwidth usage (TX = outbound only)
+    tx_bytes=$(docker exec $container_name vnstat --oneline | cut -d';' -f11 | tr -d ' ' | numfmt --from=iec 2>/dev/null || echo 0)
+    tx_gb=$(echo "scale=2; $tx_bytes / 1073741824" | bc)
+
+    # Update used bandwidth
+    sed -i "s/BANDWIDTH_USED_GB=\".*\"/BANDWIDTH_USED_GB=\"$tx_gb\"/" "$profile_dir/profile.conf"
+
+    # Convert TB to GB for comparison
+    bandwidth_limit_gb=$(echo "$BANDWIDTH_TB * 1024" | bc)
+
+    # Check if exceeded
+    exceeded=$(echo "$tx_gb >= $bandwidth_limit_gb" | bc)
+
+    if [ "$exceeded" -eq 1 ]; then
+        # Bandwidth exceeded!
+        echo "$(date): Profile $PROFILE_NAME bandwidth exceeded: ${tx_gb}GB / ${bandwidth_limit_gb}GB" >> "$LOG_FILE"
+
+        # Stop Xray service (keep SSH alive)
+        docker exec $container_name pkill -9 xray 2>/dev/null
+
+        # Update expiry check script to show bandwidth warning
+        docker exec $container_name bash -c "echo 'BANDWIDTH_EXCEEDED=1' >> /etc/xray/profile.conf"
+
+        echo "Profile $PROFILE_NAME: VPN disabled (bandwidth limit reached)"
+    else
+        remaining_gb=$(echo "$bandwidth_limit_gb - $tx_gb" | bc)
+        percent_used=$(echo "scale=2; ($tx_gb / $bandwidth_limit_gb) * 100" | bc)
+
+        echo "$(date): Profile $PROFILE_NAME: ${tx_gb}GB used / ${bandwidth_limit_gb}GB (${percent_used}%)" >> "$LOG_FILE"
+
+        # Warning if > 80%
+        if [ "$(echo "$percent_used > 80" | bc)" -eq 1 ]; then
+            echo "$(date): WARNING: Profile $PROFILE_NAME at ${percent_used}% bandwidth usage" >> "$LOG_FILE"
+        fi
+    fi
+done
+
+echo "$(date): Bandwidth check completed." >> "$LOG_FILE"
