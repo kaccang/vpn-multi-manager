@@ -15,8 +15,8 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # GitHub repo (UPDATE THIS!)
-REPO_URL="https://github.com/yourusername/vpn-multi"
-RAW_URL="https://raw.githubusercontent.com/yourusername/vpn-multi/main"
+REPO_URL="https://github.com/kaccang/vpn-multi-manager"
+RAW_URL="https://raw.githubusercontent.com/kaccang/vpn-multi-manager/main"
 
 clear
 echo -e "${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
