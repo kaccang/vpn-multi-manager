@@ -31,14 +31,57 @@ if [ "$EXPIRED_DATE" != "Unknown" ]; then
     DAYS_REMAINING=$(( ($EXPIRED_DATE_EPOCH - $NOW) / 86400 ))
 
     if [ "$DAYS_REMAINING" -lt 0 ]; then
-        EXPIRY_STATUS="${RED}EXPIRED ($((-$DAYS_REMAINING)) days overdue)${NC}"
-    elif [ "$DAYS_REMAINING" -le 5 ]; then
-        EXPIRY_STATUS="${YELLOW}$DAYS_REMAINING days remaining${NC}"
+        EXPIRY_STATUS="${RED}⚠️  EXPIRED ${NC}${RED}($((-$DAYS_REMAINING)) days overdue)${NC}"
+        EXPIRY_COLOR="RED"
+    elif [ "$DAYS_REMAINING" -eq 0 ]; then
+        EXPIRY_STATUS="${RED}⚠️  EXPIRES TODAY!${NC}"
+        EXPIRY_COLOR="RED"
+    elif [ "$DAYS_REMAINING" -le 3 ]; then
+        EXPIRY_STATUS="${RED}⚠️  ${DAYS_REMAINING} days remaining${NC}"
+        EXPIRY_COLOR="RED"
+    elif [ "$DAYS_REMAINING" -le 7 ]; then
+        EXPIRY_STATUS="${YELLOW}⏰ ${DAYS_REMAINING} days remaining${NC}"
+        EXPIRY_COLOR="YELLOW"
+    elif [ "$DAYS_REMAINING" -le 14 ]; then
+        EXPIRY_STATUS="${YELLOW}${DAYS_REMAINING} days remaining${NC}"
+        EXPIRY_COLOR="YELLOW"
     else
-        EXPIRY_STATUS="${GREEN}$DAYS_REMAINING days remaining${NC}"
+        EXPIRY_STATUS="${GREEN}✓ ${DAYS_REMAINING} days remaining${NC}"
+        EXPIRY_COLOR="GREEN"
     fi
 else
     EXPIRY_STATUS="${YELLOW}Unknown${NC}"
+    EXPIRY_COLOR="YELLOW"
+fi
+
+# Calculate bandwidth usage
+BANDWIDTH_TB="${BANDWIDTH_TB:-1}"
+BANDWIDTH_USED_GB="${BANDWIDTH_USED_GB:-0}"
+BANDWIDTH_LIMIT_GB=$(echo "$BANDWIDTH_TB * 1024" | bc)
+
+# Get current bandwidth from vnstat
+if command -v vnstat &> /dev/null; then
+    # Get TX (upload/outbound) in GB this month
+    TX_GB=$(vnstat --oneline | cut -d';' -f11 | numfmt --from=auto --to-unit=1024M 2>/dev/null || echo "0")
+    # Convert to GB
+    BANDWIDTH_USED_GB=$(echo "scale=2; $TX_GB / 1024" | bc 2>/dev/null || echo "0")
+fi
+
+# Calculate percentage
+BANDWIDTH_PERCENT=$(echo "scale=1; ($BANDWIDTH_USED_GB / $BANDWIDTH_LIMIT_GB) * 100" | bc 2>/dev/null || echo "0")
+
+if (( $(echo "$BANDWIDTH_PERCENT >= 100" | bc -l) )); then
+    BANDWIDTH_STATUS="${RED}⚠️  EXCEEDED!${NC}"
+    BANDWIDTH_COLOR="RED"
+elif (( $(echo "$BANDWIDTH_PERCENT >= 90" | bc -l) )); then
+    BANDWIDTH_STATUS="${RED}⚠️  ${BANDWIDTH_PERCENT}% used${NC}"
+    BANDWIDTH_COLOR="RED"
+elif (( $(echo "$BANDWIDTH_PERCENT >= 75" | bc -l) )); then
+    BANDWIDTH_STATUS="${YELLOW}⏰ ${BANDWIDTH_PERCENT}% used${NC}"
+    BANDWIDTH_COLOR="YELLOW"
+else
+    BANDWIDTH_STATUS="${GREEN}✓ ${BANDWIDTH_PERCENT}% used${NC}"
+    BANDWIDTH_COLOR="GREEN"
 fi
 
 # Get resource usage
@@ -59,12 +102,48 @@ VMESS_COUNT=$(grep -c '^###' /etc/xray/config.json 2>/dev/null || echo 0)
 VLESS_COUNT=$(grep -c '^#&' /etc/xray/config.json 2>/dev/null || echo 0)
 TROJAN_COUNT=$(grep -c '^#!' /etc/xray/config.json 2>/dev/null || echo 0)
 
+# Display warning banner if critical
+if [ "$EXPIRY_COLOR" = "RED" ] || [ "$BANDWIDTH_COLOR" = "RED" ]; then
+    echo ""
+    echo -e "${RED}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║            ⚠️  WARNING ALERT ⚠️            ║${NC}"
+    echo -e "${RED}╚══════════════════════════════════════════╝${NC}"
+
+    if [ "$EXPIRY_COLOR" = "RED" ]; then
+        if [ "$DAYS_REMAINING" -lt 0 ]; then
+            echo -e "${RED}  ⛔ Profile EXPIRED $((-$DAYS_REMAINING)) days ago!${NC}"
+        elif [ "$DAYS_REMAINING" -eq 0 ]; then
+            echo -e "${RED}  ⛔ Profile EXPIRES TODAY!${NC}"
+        else
+            echo -e "${RED}  ⏰ Only ${DAYS_REMAINING} days remaining!${NC}"
+        fi
+        echo -e "${YELLOW}  → Contact admin to renew your profile${NC}"
+    fi
+
+    if [ "$BANDWIDTH_COLOR" = "RED" ]; then
+        if (( $(echo "$BANDWIDTH_PERCENT >= 100" | bc -l) )); then
+            echo -e "${RED}  ⛔ Bandwidth EXCEEDED! (${BANDWIDTH_PERCENT}%)${NC}"
+        else
+            echo -e "${RED}  ⚠️  Bandwidth almost full! (${BANDWIDTH_PERCENT}%)${NC}"
+        fi
+        echo -e "${YELLOW}  → ${BANDWIDTH_USED_GB}GB used of ${BANDWIDTH_TB}TB${NC}"
+    fi
+
+    echo -e "${RED}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+fi
+
 echo -e "${YELLOW}Profile Information:${NC}"
-echo -e "  Name         : $PROFILE_NAME"
-echo -e "  Domain       : $DOMAIN"
-echo -e "  Expiry       : $EXPIRED_DATE"
-echo -e "  Status       : $EXPIRY_STATUS"
+echo -e "  Name         : ${CYAN}$PROFILE_NAME${NC}"
+echo -e "  Domain       : ${CYAN}$DOMAIN${NC}"
+echo -e "  Expired Date : ${CYAN}$EXPIRED_DATE${NC}"
+echo -e "  Expiry Status: $EXPIRY_STATUS"
 echo -e "  Xray Status  : $XRAY_STATUS"
+echo ""
+echo -e "${YELLOW}Bandwidth Usage:${NC}"
+echo -e "  Limit        : ${CYAN}${BANDWIDTH_TB} TB/month${NC}"
+echo -e "  Used (TX)    : ${CYAN}${BANDWIDTH_USED_GB} GB${NC}"
+echo -e "  Status       : $BANDWIDTH_STATUS"
 echo ""
 echo -e "${YELLOW}Resource Usage:${NC}"
 echo -e "  CPU Usage    : ${CPU_USAGE}%"
@@ -72,9 +151,9 @@ echo -e "  RAM Usage    : ${RAM_USED}MB / ${RAM_TOTAL}MB"
 echo -e "  Disk Usage   : ${DISK_USAGE}"
 echo ""
 echo -e "${YELLOW}VPN Accounts:${NC}"
-echo -e "  VMess        : ${GREEN}${VMESS_COUNT}${NC}"
-echo -e "  VLess        : ${CYAN}${VLESS_COUNT}${NC}"
-echo -e "  Trojan       : ${YELLOW}${TROJAN_COUNT}${NC}"
+echo -e "  VMess        : ${GREEN}${VMESS_COUNT}${NC} users"
+echo -e "  VLess        : ${CYAN}${VLESS_COUNT}${NC} users"
+echo -e "  Trojan       : ${YELLOW}${TROJAN_COUNT}${NC} users"
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""

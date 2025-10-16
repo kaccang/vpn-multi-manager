@@ -170,7 +170,7 @@ fi
 mkdir -p $INSTALL_DIR/{profiles,backups/{per-profile,global},logs}
 
 # Configure Nginx
-echo -e "${YELLOW}[10/10] Configuring Nginx...${NC}"
+echo -e "${YELLOW}[10/12] Configuring Nginx...${NC}"
 cat > /etc/nginx/sites-available/vpn-multi <<'NGINX'
 server {
     listen 80 default_server;
@@ -182,6 +182,48 @@ NGINX
 
 ln -sf /etc/nginx/sites-available/vpn-multi /etc/nginx/sites-enabled/ 2>/dev/null
 nginx -t && systemctl reload nginx
+
+# Change SSH port for security
+echo -e "${YELLOW}[11/12] Changing SSH port to 4444 (security)...${NC}"
+SSH_PORT=4444
+
+# Backup original sshd_config
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+
+# Change SSH port
+sed -i "s/^#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
+sed -i "s/^Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
+
+# Make sure Port directive exists
+if ! grep -q "^Port $SSH_PORT" /etc/ssh/sshd_config; then
+    echo "Port $SSH_PORT" >> /etc/ssh/sshd_config
+fi
+
+echo -e "${GREEN}✓ SSH port changed to $SSH_PORT${NC}"
+
+# Setup firewall
+echo -e "${YELLOW}[12/12] Configuring firewall...${NC}"
+if command -v ufw &> /dev/null; then
+    ufw --force enable
+    ufw allow $SSH_PORT/tcp comment 'SSH Host'
+    ufw allow 80/tcp comment 'HTTP'
+    ufw allow 443/tcp comment 'HTTPS'
+    ufw allow 2200:2333/tcp comment 'SSH Containers'
+    echo -e "${GREEN}✓ Firewall configured${NC}"
+else
+    echo -e "${YELLOW}⚠ UFW not available, install manually:${NC}"
+    echo "  apt install ufw"
+    echo "  ufw allow $SSH_PORT/tcp"
+    echo "  ufw allow 80/tcp"
+    echo "  ufw allow 443/tcp"
+    echo "  ufw allow 2200:2333/tcp"
+    echo "  ufw enable"
+fi
+
+# Restart SSH service
+echo -e "${YELLOW}Restarting SSH service...${NC}"
+systemctl restart sshd || systemctl restart ssh
+echo -e "${GREEN}✓ SSH service restarted${NC}"
 
 # Cleanup
 rm -rf /tmp/vpn-multi
@@ -195,6 +237,20 @@ echo -e "${GREEN}║                                                      ║${N
 echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Installation completed successfully!${NC}"
+echo ""
+echo -e "${RED}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${RED}║  ⚠️  IMPORTANT: SSH PORT CHANGED TO 4444 ⚠️           ║${NC}"
+echo -e "${RED}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${YELLOW}Your SSH session will stay active, but for next login use:${NC}"
+echo -e "  ${GREEN}ssh root@YOUR_VPS_IP -p 4444${NC}"
+echo ""
+echo -e "${YELLOW}Don't close this session until you verify new SSH port works!${NC}"
+echo ""
+echo -e "${YELLOW}Test in new terminal:${NC}"
+echo -e "  ${GREEN}ssh root@$(hostname -I | awk '{print $1}') -p 4444${NC}"
+echo ""
+echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo ""

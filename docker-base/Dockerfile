@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     jq \
     socat \
     nginx \
+    bc \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Xray - Latest version

@@ -59,9 +59,17 @@ Sistem manajemen VPN berbasis Docker yang memungkinkan 1 VPS menjalankan multipl
 
 ```bash
 cd /root
-git clone <repository-url> vpn-multi
+git clone https://github.com/kaccang/vpn-multi-manager.git vpn-multi
 cd vpn-multi
 ```
+
+Or use one-liner installer:
+
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/kaccang/vpn-multi-manager/main/install.sh)
+```
+
+**⚠️ SSH Port Notice:** Installer will change SSH port from 22 → 4444 for security.
 
 ### 2. Run Installation
 
@@ -380,26 +388,31 @@ docker-compose up -d
 
 ## Security Notes
 
-1. **Change default SSH password** di setiap profile:
+**Host SSH Port:** The system uses port **4444** for host SSH (not 22) to prevent confusion with container SSH ports (2200-2333).
+
+1. **After installation, reconnect with:**
+   ```bash
+   ssh root@YOUR_VPS_IP -p 4444
+   ```
+
+2. **Change default SSH password** di setiap profile:
    ```bash
    passwd
    ```
 
-2. **Setup firewall** (UFW):
-   ```bash
-   ufw allow 22/tcp
-   ufw allow 80/tcp
-   ufw allow 443/tcp
-   ufw allow 2200:2222/tcp
-   ufw enable
+3. **Firewall automatically configured:**
+   ```
+   Port 4444     - Host SSH
+   Port 80/443   - HTTP/HTTPS
+   Port 2200-2333 - Container SSH
    ```
 
-3. **Regular updates**:
+4. **Regular updates**:
    ```bash
    apt update && apt upgrade -y
    ```
 
-4. **Monitor logs**:
+5. **Monitor logs**:
    ```bash
    tail -f /opt/vpn-multi/logs/system.log
    ```

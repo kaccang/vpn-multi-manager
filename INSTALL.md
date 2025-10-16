@@ -60,10 +60,15 @@ vpn3.example.com    A    123.45.67.89
 Run this single command to install the entire system:
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/yourusername/vpn-multi/main/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/kaccang/vpn-multi-manager/main/install.sh)
 ```
 
-**Note**: Replace `yourusername/vpn-multi` with your actual GitHub repository URL.
+**⚠️ IMPORTANT:** The installer will automatically change your SSH port from **22** to **4444** for security reasons. This prevents confusion with container SSH ports (2200-2333).
+
+**After installation:**
+- Your current SSH session will stay active
+- For next login: `ssh root@YOUR_VPS_IP -p 4444`
+- **DO NOT close** your session until you verify the new port works!
 
 ### What Gets Installed
 
@@ -78,16 +83,18 @@ The installer will automatically install:
 
 You'll see these steps:
 ```
-[1/10] Updating system...
-[2/10] Installing dependencies...
-[3/10] Installing Docker...
-[4/10] Installing Docker Compose...
-[5/10] Installing Nginx...
-[6/10] Installing rclone...
-[7/10] Downloading VPN Multi-Profile System...
-[8/10] Installing system files...
-[9/10] Setting up configuration...
-[10/10] Configuring Nginx...
+[1/12] Updating system...
+[2/12] Installing dependencies...
+[3/12] Installing Docker...
+[4/12] Installing Docker Compose...
+[5/12] Installing Nginx...
+[6/12] Installing rclone...
+[7/12] Downloading VPN Multi-Profile System...
+[8/12] Installing system files...
+[9/12] Setting up configuration...
+[10/12] Configuring Nginx...
+[11/12] Changing SSH port to 4444 (security)...
+[12/12] Configuring firewall...
 ```
 
 ### Installation Time
@@ -421,20 +428,31 @@ For each profile domain, install SSL certificate:
 
 ### Firewall Configuration
 
-Allow necessary ports:
+The installer automatically configures firewall with these ports:
+
 ```bash
-# Allow SSH (default port)
-ufw allow 22/tcp
+# Host SSH (changed from 22)
+Port 4444/tcp - SSH access to host VPS
 
-# Allow HTTP/HTTPS (for reverse proxy)
-ufw allow 80/tcp
-ufw allow 443/tcp
+# HTTP/HTTPS
+Port 80/tcp  - HTTP (for Let's Encrypt & Nginx)
+Port 443/tcp - HTTPS (for VPN traffic & Nginx)
 
-# Allow SSH port range (for profile containers)
-ufw allow 2200:2333/tcp
+# Container SSH
+Ports 2200-2333/tcp - SSH access to profile containers
+```
 
-# Enable firewall
-ufw enable
+**Why SSH port 4444?**
+- ✅ Prevents confusion with container SSH ports (2200-2333)
+- ✅ Reduces brute-force attacks on port 22
+- ✅ Clear separation: Host (4444) vs Containers (2200-2333)
+
+**Verify new SSH port works:**
+```bash
+# In new terminal, test connection:
+ssh root@YOUR_VPS_IP -p 4444
+
+# If works, close old session
 ```
 
 ### Automatic Updates
@@ -688,19 +706,57 @@ tail -f /var/log/nginx/error.log
 
 ## Security Best Practices
 
-### 1. Change Default SSH Port
+### 1. Verify New SSH Port
 
-Edit `/etc/ssh/sshd_config`:
+**CRITICAL: Test before closing your session!**
+
 ```bash
-Port 2222  # Change from 22
+# Open NEW terminal, test connection:
+ssh root@YOUR_VPS_IP -p 4444
+
+# If successful:
+# ✅ You can safely close old session
+# ✅ Update your SSH client saved sessions
+
+# If failed:
+# ⚠️ Keep old session open
+# ⚠️ Check firewall: ufw status
+# ⚠️ Check SSH config: cat /etc/ssh/sshd_config | grep Port
 ```
 
-Restart SSH:
+### 2. Save SSH Config (Optional)
+
+Add to `~/.ssh/config` on your local machine:
+
+```
+Host myvps
+    HostName YOUR_VPS_IP
+    Port 4444
+    User root
+```
+
+Then connect with: `ssh myvps`
+
+### 3. Change Default SSH Port (If Needed)
+
+If you want different port than 4444:
+
 ```bash
+# Edit SSH config
+nano /etc/ssh/sshd_config
+
+# Change:
+Port 4455  # Or any port you prefer
+
+# Update firewall
+ufw delete allow 4444/tcp
+ufw allow 4455/tcp
+
+# Restart SSH
 systemctl restart sshd
 ```
 
-### 2. Disable Root Password Login
+### 4. Disable Root Password Login
 
 Edit `/etc/ssh/sshd_config`:
 ```bash
