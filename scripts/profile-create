@@ -47,9 +47,9 @@ get_next_ssh_port() {
     return 1
 }
 
-# Function: Validate domain
+# Function: Validate domain (supports subdomains)
 validate_domain() {
-    [[ $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.[a-zA-Z]{2,}$ ]]
+    [[ $1 =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]
 }
 
 # Function: Validate password
@@ -206,7 +206,7 @@ fi
 echo -e "${YELLOW}[2/8] Creating Xray config...${NC}"
 cat > "$PROFILES_DIR/$profile_name/config.json" <<'XRAYEOF'
 {
-  "log": {"loglevel": "warning"},
+  "log": {"loglevel": "error"},
   "inbounds": [
     {"listen": "0.0.0.0", "port": 10001, "protocol": "vless",
      "settings": {"decryption": "none", "clients": [{"id": "placeholder-uuid"

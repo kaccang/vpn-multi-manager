@@ -30,6 +30,9 @@ exp=$(date -d "$masaaktif days" +"%Y-%m-%d")
 # Add to config
 sed -i "/#vless$/a\#& $user $exp\n},{ \"id\": \"$uuid\", \"email\": \"$user\"" "$CONFIG"
 
+# Remove placeholder if exists (first user)
+sed -i '/"id": "placeholder-uuid"$/,/#vless$/ { /"id": "placeholder-uuid"$/d; }' "$CONFIG"
+
 # Generate VLess link
 vlesslink="vless://${uuid}@${DOMAIN}:443?path=/vless&security=tls&encryption=none&type=ws&host=${DOMAIN}#${user}"
 

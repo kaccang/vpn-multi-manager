@@ -8,6 +8,11 @@ echo "Starting VPN Profile Container..."
 /usr/sbin/sshd -D &
 echo "✓ SSH server started"
 
+# Initialize vnstat database (eth0 interface)
+if [ ! -f /var/lib/vnstat/vnstat.db ]; then
+    vnstat --create -i eth0 2>/dev/null && echo "✓ vnstat database initialized" || true
+fi
+
 # Start vnstat daemon
 /usr/bin/vnstatd -d
 echo "✓ vnstat daemon started"

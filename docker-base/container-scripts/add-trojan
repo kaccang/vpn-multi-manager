@@ -30,6 +30,9 @@ exp=$(date -d "$masaaktif days" +"%Y-%m-%d")
 # Add to config
 sed -i "/#trojanws$/a\#! $user $exp\n},{ \"password\": \"$password\", \"email\": \"$user\"" "$CONFIG"
 
+# Remove placeholder if exists (first user)
+sed -i '/"password": "placeholder-password"$/,/#trojanws$/ { /"password": "placeholder-password"$/d; }' "$CONFIG"
+
 # Generate Trojan link
 trojanlink="trojan://${password}@${DOMAIN}:443?path=/trojan-ws&security=tls&type=ws&host=${DOMAIN}#${user}"
 

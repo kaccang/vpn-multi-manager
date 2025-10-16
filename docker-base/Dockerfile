@@ -62,7 +62,8 @@ RUN mkdir -p /etc/xray /root/scripts /var/log/xray /root/.ssh
 
 # Copy management scripts
 COPY container-scripts/ /root/scripts/
-RUN chmod +x /root/scripts/*
+RUN chmod +x /root/scripts/* && \
+    ln -sf /root/scripts/menu /usr/local/bin/menu
 
 # Setup check-expiry on login
 COPY check-expiry.sh /root/check-expiry.sh
